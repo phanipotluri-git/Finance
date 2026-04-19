@@ -1,0 +1,17 @@
+{
+  "name": "NSE Risk Monitor",
+  "short_name": "RiskMon",
+  "description": "Real-time Indian equity market risk assessment and entry/exit signals",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0c0f",
+  "theme_color": "#0a0c0f",
+  "lang": "en",
+  "categories": ["finance"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

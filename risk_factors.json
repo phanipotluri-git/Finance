@@ -1,0 +1,52 @@
+{
+  "generated_at": "2026-04-19T01:00:00Z",
+  "next_update":  "2026-04-19T07:30:00Z",
+  "_note": "SEED FILE — will be overwritten on first GitHub Actions run",
+  "factors": {
+    "breadth": {
+      "score": 58,
+      "raw": {
+        "pct_above_20ma": 56.0,
+        "pct_above_50ma": 52.0,
+        "stocks_sampled": 0
+      }
+    },
+    "fii_proxy": {
+      "score": 52,
+      "raw": {
+        "inr_20d_chg_pct": 0.0,
+        "midcap_vs_largecap_20d_chg": 0.0,
+        "inr_component": 50,
+        "risk_on_component": 54
+      }
+    },
+    "macro": {
+      "score": 60,
+      "raw": {
+        "inr_vs_1y_range_pct": 50.0,
+        "vix_20d_avg": 14.5,
+        "inr_component": 50,
+        "vix_component": 75
+      }
+    }
+  },
+  "sectors": {
+    "Nifty 50":   { "score": 62, "change_1d": 0.12, "change_5d": 0.85, "change_20d": 1.20, "rsi": 54.2, "above_20ma": true,  "above_50ma": true,  "price": 22400 },
+    "Bank Nifty": { "score": 58, "change_1d": 0.08, "change_5d": 0.60, "change_20d": 0.90, "rsi": 51.8, "above_20ma": true,  "above_50ma": true,  "price": 48200 },
+    "IT":         { "score": 65, "change_1d": 0.22, "change_5d": 1.10, "change_20d": 2.50, "rsi": 56.4, "above_20ma": true,  "above_50ma": true,  "price": 38500 },
+    "Pharma":     { "score": 68, "change_1d": 0.15, "change_5d": 0.90, "change_20d": 3.10, "rsi": 58.1, "above_20ma": true,  "above_50ma": true,  "price": 19200 },
+    "Auto":       { "score": 60, "change_1d": 0.10, "change_5d": 0.70, "change_20d": 1.80, "rsi": 53.5, "above_20ma": true,  "above_50ma": false, "price": 24100 },
+    "FMCG":       { "score": 55, "change_1d": 0.05, "change_5d": 0.30, "change_20d": 0.60, "rsi": 49.0, "above_20ma": false, "above_50ma": true,  "price": 57800 },
+    "Metal":      { "score": 45, "change_1d": -0.30,"change_5d":-1.20, "change_20d":-2.00, "rsi": 43.2, "above_20ma": false, "above_50ma": false, "price": 9100  },
+    "Realty":     { "score": 50, "change_1d": 0.08, "change_5d": 0.40, "change_20d": 1.00, "rsi": 50.8, "above_20ma": true,  "above_50ma": false, "price": 810   },
+    "Energy":     { "score": 55, "change_1d": 0.18, "change_5d": 0.80, "change_20d": 1.50, "rsi": 52.1, "above_20ma": true,  "above_50ma": false, "price": 40200 },
+    "Infra":      { "score": 52, "change_1d": 0.07, "change_5d": 0.50, "change_20d": 0.80, "rsi": 50.5, "above_20ma": true,  "above_50ma": false, "price": 9800  }
+  },
+  "market_context": {
+    "nifty_ema20":  22200,
+    "nifty_ema50":  21800,
+    "nifty_ema200": 20500,
+    "vix_20d_avg":  14.5,
+    "inr_current":  83.85
+  }
+}

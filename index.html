@@ -1,656 +1,778 @@
-import { useState, useEffect, useCallback, useRef } from “react”;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="RiskMon"/>
+  <meta name="theme-color" content="#0a0c0f"/>
+  <title>NSE Risk Monitor</title>
+  <link rel="manifest" href="./manifest.json"/>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
 
-// ── colour tokens ──────────────────────────────────────────────────────────────
-const C = {
-bg:       “#0a0c0f”,
-surface:  “#0f1318”,
-card:     “#131820”,
-border:   “#1e2530”,
-borderHi: “#2a3545”,
-amber:    “#f5a623”,
-amberDim: “#8a5c12”,
-green:    “#00d084”,
-greenDim: “#004d30”,
-red:      “#ff4757”,
-redDim:   “#5c0d16”,
-yellow:   “#ffd32a”,
-blue:     “#2196f3”,
-cyan:     “#00bcd4”,
-white:    “#e8edf2”,
-muted:    “#5a6a7a”,
-dimText:  “#8899aa”,
-};
+    :root {
+      --bg:#0a0c0f; --surface:#0f1318; --card:#131820; --border:#1e2530;
+      --green:#00d084; --yellow:#ffd32a; --amber:#f5a623; --red:#ff4757;
+      --cyan:#00bcd4; --white:#e8edf2; --muted:#5a6a7a; --dim:#8899aa;
+      --font:'JetBrains Mono','Fira Code',monospace;
+      --safe-top:env(safe-area-inset-top,0px);
+      --safe-bottom:env(safe-area-inset-bottom,0px);
+    }
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+    html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--font);overflow:hidden}
+    #app{display:flex;flex-direction:column;height:100vh;height:100dvh}
 
-// ── risk-factor definitions ────────────────────────────────────────────────────
-const RISK_FACTORS = [
-{ key:“vix”,       label:“India VIX”,        weight:20, desc:“Volatility fear gauge” },
-{ key:“trend”,     label:“Trend Strength”,   weight:20, desc:“Nifty above key EMAs” },
-{ key:“momentum”,  label:“Price Momentum”,   weight:15, desc:“RSI + rate-of-change” },
-{ key:“breadth”,   label:“Market Breadth”,   weight:15, desc:“Advance/Decline ratio” },
-{ key:“fii”,       label:“FII Flow”,         weight:15, desc:“Foreign institutional activity” },
-{ key:“macro”,     label:“Macro Stability”,  weight:15, desc:“INR, bond yields, CPI proxy” },
-];
+    /* ── Header ── */
+    #hdr{
+      background:var(--surface);border-bottom:1px solid var(--border);
+      padding:10px 14px;padding-top:calc(10px + var(--safe-top));flex-shrink:0
+    }
+    #hdr-row1{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    #ticker-row{display:flex;gap:14px;overflow-x:auto;scrollbar-width:none;margin-top:7px}
+    #ticker-row::-webkit-scrollbar{display:none}
+    .tk{flex-shrink:0;display:flex;flex-direction:column;gap:1px}
+    .tk-k{font-size:7.5px;color:var(--muted);letter-spacing:1px;text-transform:uppercase}
+    .tk-v{font-size:13px;font-weight:700}
 
-const NSE_SECTORS = [
-“Nifty 50”,“Bank Nifty”,“IT”,“Pharma”,“Auto”,“FMCG”,“Metal”,“Realty”,“Energy”,“Infra”,
-];
+    /* ── Content + tabs ── */
+    #content{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+    #content::-webkit-scrollbar{width:3px}
+    #content::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+    #tabs{background:var(--surface);border-top:1px solid var(--border);display:flex;flex-shrink:0;padding-bottom:var(--safe-bottom)}
+    .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:9px 4px;background:none;border:none;color:var(--muted);font-family:var(--font);font-size:7.5px;letter-spacing:1.5px;cursor:pointer;transition:color .2s;gap:3px}
+    .tab svg{width:18px;height:18px}
+    .tab.on{color:var(--amber)}
 
-// ── deterministic pseudo-random (seeded) ──────────────────────────────────────
-function seeded(seed) {
-let s = seed;
-return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 4294967296; };
-}
+    /* ── Pages ── */
+    .page{display:none;padding:13px;animation:fadeIn .22s ease}
+    .page.on{display:block}
 
-function genMarketData() {
-const rng = seeded(Date.now() % 86400000 | 0);          // changes each “session”
-const rawScores = {};
-RISK_FACTORS.forEach(f => { rawScores[f.key] = Math.round(30 + rng() * 55); });
+    /* ── Cards / common ── */
+    .card{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:13px;margin-bottom:11px}
+    .lbl{font-size:8.5px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+    .badge{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:700;letter-spacing:1.5px;padding:4px 9px;border-radius:3px;border:1px solid currentColor}
+    .bar-bg{background:#1a2030;border-radius:3px;height:5px;overflow:hidden;flex:1}
+    .bar-fill{height:100%;border-radius:3px;transition:width .8s ease}
+    .src-live{font-size:7px;letter-spacing:1px;padding:2px 5px;border-radius:2px;font-weight:700;background:#00d08418;color:var(--green);border:1px solid #00d08440}
+    .src-daily{font-size:7px;letter-spacing:1px;padding:2px 5px;border-radius:2px;font-weight:700;background:#f5a62318;color:var(--amber);border:1px solid #f5a62340}
+    hr.div{border:none;border-top:1px solid var(--border);margin:10px 0}
+    .btn{background:none;border:1px solid var(--border);color:var(--dim);font-family:var(--font);font-size:9px;letter-spacing:2px;padding:7px 13px;border-radius:3px;cursor:pointer;text-transform:uppercase;transition:all .2s}
+    .btn-a{border-color:var(--amber);color:var(--amber)}
+    .btn-a:active,.btn-a:hover{background:var(--amber);color:var(--bg)}
+    .spinner{width:15px;height:15px;border:2px solid var(--amber);border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;display:inline-block;vertical-align:middle}
+    .live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite;display:inline-block;flex-shrink:0}
 
-// composite weighted
-const composite = Math.round(
-RISK_FACTORS.reduce((acc, f) => acc + rawScores[f.key] * f.weight / 100, 0)
-);
+    /* ── Sector grid ── */
+    .sec-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-top:10px}
+    @media(min-width:480px){.sec-grid{grid-template-columns:repeat(3,1fr)}}
+    @media(min-width:640px){.page{max-width:680px;margin:0 auto}}
 
-const sectors = {};
-NSE_SECTORS.forEach(s => {
-sectors[s] = { score: Math.round(25 + rng() * 65), change: (rng() * 6 - 3).toFixed(2) };
-});
+    /* ── Narrative ── */
+    .narr{font-size:11px;line-height:1.8;color:var(--white)}
+    .narr .sh{color:var(--cyan);font-size:8.5px;letter-spacing:2px;text-transform:uppercase;margin:11px 0 5px}
+    .narr .bul{display:flex;gap:7px;margin:3px 0}
+    .narr strong{color:var(--amber)}
 
-const nifty = (21800 + rng() * 2400).toFixed(2);
-const bnifty = (46000 + rng() * 5000).toFixed(2);
-const vix = (12 + rng() * 18).toFixed(2);
-const inr = (83 + rng() * 2).toFixed(2);
-const tnY10 = (6.8 + rng() * 0.8).toFixed(2);
+    /* ── Settings bottom sheet ── */
+    #modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:200;align-items:flex-end;justify-content:center}
+    #modal.on{display:flex}
+    #modal-panel{background:var(--surface);border:1px solid var(--border);border-radius:12px 12px 0 0;padding:20px 16px;padding-bottom:calc(20px + var(--safe-bottom));width:100%;max-width:520px}
+    .inp{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--white);font-family:var(--font);font-size:11px;padding:9px 11px;margin-top:7px;outline:none}
+    .inp:focus{border-color:var(--amber)}
 
-// 30-bar equity curve
-const equity = [100];
-for (let i = 1; i < 30; i++) equity.push(+(equity[i-1] * (1 + (rng()-0.45)*0.025)).toFixed(2));
+    /* ── Animations ── */
+    @keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+  </style>
+</head>
+<body>
+<div id="app">
 
-return { rawScores, composite, sectors, nifty, bnifty, vix, inr, tnY10, equity };
-}
-
-// ── risk label ────────────────────────────────────────────────────────────────
-function riskLabel(score) {
-if (score >= 70) return { label:“LOW RISK”,    color: C.green,  bg: C.greenDim, signal:“ENTER”, emoji:“🟢” };
-if (score >= 50) return { label:“MODERATE”,    color: C.yellow, bg: “#4a3a00”,  signal:“HOLD”,  emoji:“🟡” };
-if (score >= 35) return { label:“ELEVATED”,    color: C.amber,  bg: C.amberDim, signal:“REDUCE”,emoji:“🟠” };
-return               { label:“HIGH RISK”,   color: C.red,    bg: C.redDim,   signal:“EXIT”,  emoji:“🔴” };
-}
-
-// ── mini bar ─────────────────────────────────────────────────────────────────
-function ScoreBar({ value, max = 100, color }) {
-return (
-<div style={{ background: “#1a2030”, borderRadius:3, height:6, overflow:“hidden”, flex:1 }}>
-<div style={{
-height:“100%”, width:`${(value/max)*100}%`,
-background: color, borderRadius:3,
-transition:“width 1s ease”,
-boxShadow:`0 0 6px ${color}88`,
-}}/>
-</div>
-);
-}
-
-// ── simple SVG sparkline ──────────────────────────────────────────────────────
-function Sparkline({ data, color, height=40, width=120 }) {
-const mn = Math.min(…data), mx = Math.max(…data);
-const range = mx - mn || 1;
-const pts = data.map((v,i) => {
-const x = (i/(data.length-1))*width;
-const y = height - ((v-mn)/range)*(height-4) - 2;
-return `${x},${y}`;
-}).join(” “);
-return (
-<svg width={width} height={height} style={{display:“block”}}>
-<polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round"/>
-<polyline
-points={`0,${height} ${pts} ${width},${height}`}
-fill={`${color}22`} stroke=“none”
-/>
-</svg>
-);
-}
-
-// ── gauge arc ────────────────────────────────────────────────────────────────
-function GaugeArc({ score }) {
-const r = 70, cx = 90, cy = 90;
-const startAngle = -200, sweepMax = 220;
-const sweep = (score / 100) * sweepMax;
-const toXY = (deg, radius) => {
-const rad = (deg * Math.PI) / 180;
-return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
-};
-const arcPath = (deg1, deg2, ri, ro) => {
-const s1 = toXY(deg1, ro), e1 = toXY(deg2, ro);
-const s2 = toXY(deg2, ri), e2 = toXY(deg1, ri);
-const large = deg2-deg1 > 180 ? 1 : 0;
-return `M ${s1.x} ${s1.y} A ${ro} ${ro} 0 ${large} 1 ${e1.x} ${e1.y} L ${s2.x} ${s2.y} A ${ri} ${ri} 0 ${large} 0 ${e2.x} ${e2.y} Z`;
-};
-const rl = riskLabel(score);
-const endDeg = startAngle + sweep;
-const ticks = [0,25,50,75,100].map(v => {
-const deg = startAngle + (v/100)*sweepMax;
-const inner = toXY(deg, r-16);
-const outer = toXY(deg, r-6);
-return { inner, outer, label: toXY(deg, r-28), v };
-});
-
-return (
-<svg width={180} height={130} style={{overflow:“visible”}}>
-{/* track */}
-<path d={arcPath(startAngle, startAngle+sweepMax, r-14, r)} fill=”#1a2030”/>
-{/* fill */}
-{sweep > 0 && <path d={arcPath(startAngle, endDeg, r-14, r)} fill={rl.color} opacity={0.9}/>}
-{/* glow */}
-{sweep > 0 && <path d={arcPath(startAngle, endDeg, r-14, r)} fill={rl.color} opacity={0.3} filter=“url(#glow)”/>}
-<defs>
-<filter id="glow"><feGaussianBlur stdDeviation="4" result="blur"/>
-<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-</filter>
-</defs>
-{/* ticks */}
-{ticks.map(t => (
-<g key={t.v}>
-<line x1={t.inner.x} y1={t.inner.y} x2={t.outer.x} y2={t.outer.y} stroke={C.border} strokeWidth={2}/>
-<text x={t.label.x} y={t.label.y} fill={C.muted} fontSize={7} textAnchor="middle">{t.v}</text>
-</g>
-))}
-{/* score */}
-<text x={cx} y={cy+8} textAnchor="middle" fill={rl.color} fontSize={28} fontWeight={700}
-fontFamily="'JetBrains Mono', monospace">{score}</text>
-<text x={cx} y={cy+22} textAnchor="middle" fill={rl.color} fontSize={8.5} letterSpacing={2}
-fontFamily="'JetBrains Mono', monospace">{rl.label}</text>
-</svg>
-);
-}
-
-// ── main app ─────────────────────────────────────────────────────────────────
-export default function RiskModel() {
-const [data, setData]               = useState(null);
-const [loading, setLoading]         = useState(true);
-const [aiAnalysis, setAiAnalysis]   = useState(””);
-const [aiLoading, setAiLoading]     = useState(false);
-const [aiError, setAiError]         = useState(””);
-const [refreshing, setRefreshing]   = useState(false);
-const [lastUpdated, setLastUpdated] = useState(null);
-const [selectedFactor, setSelected] = useState(null);
-const timerRef = useRef(null);
-
-const loadData = useCallback(() => {
-setRefreshing(true);
-setTimeout(() => {
-setData(genMarketData());
-setLastUpdated(new Date());
-setRefreshing(false);
-setLoading(false);
-}, 600);
-}, []);
-
-useEffect(() => {
-loadData();
-timerRef.current = setInterval(loadData, 60000);
-return () => clearInterval(timerRef.current);
-}, [loadData]);
-
-const runAiAnalysis = useCallback(async () => {
-if (!data) return;
-setAiLoading(true); setAiError(””); setAiAnalysis(””);
-const rl = riskLabel(data.composite);
-const prompt = `You are a senior quant risk analyst specialising in Indian equity markets (NSE/BSE).
-Given the following market snapshot, provide a concise 3-section risk assessment:
-
-## MARKET SNAPSHOT
-
-- Nifty 50: ₹${data.nifty}
-- Bank Nifty: ₹${data.bnifty}
-- India VIX: ${data.vix}
-- INR/USD: ${data.inr}
-- 10Y Gsec Yield: ${data.tnY10}%
-
-## COMPOSITE RISK SCORE: ${data.composite}/100 → ${rl.label} (Signal: ${rl.signal})
-
-## FACTOR SCORES (0=extreme risk, 100=no risk)
-
-${RISK_FACTORS.map(f => `- ${f.label}: ${data.rawScores[f.key]}/100`).join(”\n”)}
-
-## SECTOR RISK SCORES
-
-${NSE_SECTORS.map(s => `- ${s}: ${data.sectors[s].score}/100 (${data.sectors[s].change}%)`).join(”\n”)}
-
-Provide:
-
-1. **Market Assessment** (2-3 sentences): Current market risk regime and primary drivers
-1. **Investment Action** (2-3 sentences): Whether to enter, hold, or exit positions; which sectors to favour
-1. **Key Risks to Watch** (bullet list of 3-4 risks): Specific triggers that could change the regime
-
-Be specific, data-driven, and concise. Reference actual values. No generic advice.`;
-
-```
-try {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      system: "You are a quant risk analyst for Indian equity markets. Be precise, data-driven, and concise.",
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  const json = await res.json();
-  const text = json.content?.find(b => b.type === "text")?.text || "";
-  setAiAnalysis(text);
-} catch(e) {
-  setAiError("Analysis failed. Please retry.");
-} finally {
-  setAiLoading(false);
-}
-```
-
-}, [data]);
-
-// ── styles ──────────────────────────────────────────────────────────────────
-const S = {
-root: {
-background: C.bg,
-minHeight: “100vh”,
-fontFamily: “‘JetBrains Mono’, ‘Fira Code’, monospace”,
-color: C.white,
-padding: “0”,
-},
-header: {
-background: C.surface,
-borderBottom: `1px solid ${C.border}`,
-padding: “14px 24px”,
-display: “flex”,
-alignItems: “center”,
-justifyContent: “space-between”,
-position: “sticky”,
-top: 0,
-zIndex: 100,
-},
-logo: {
-display: “flex”, alignItems: “center”, gap: 10,
-},
-dot: {
-width: 8, height: 8, borderRadius: “50%”,
-background: C.green,
-boxShadow: `0 0 8px ${C.green}`,
-animation: “pulse 2s infinite”,
-},
-grid: {
-display: “grid”,
-gridTemplateColumns: “280px 1fr”,
-gridTemplateRows: “auto”,
-gap: 1,
-background: C.border,
-minHeight: “calc(100vh - 53px)”,
-},
-sidebar: {
-background: C.surface,
-padding: 20,
-display: “flex”, flexDirection: “column”, gap: 20,
-},
-main: {
-background: C.bg,
-padding: 20,
-display: “flex”, flexDirection: “column”, gap: 20,
-},
-card: {
-background: C.card,
-border: `1px solid ${C.border}`,
-borderRadius: 6,
-padding: 16,
-},
-label: { fontSize: 9, letterSpacing: 2, color: C.muted, textTransform: “uppercase”, marginBottom: 4 },
-val: { fontSize: 20, fontWeight: 700, color: C.white },
-btn: {
-background: “transparent”,
-border: `1px solid ${C.amber}`,
-color: C.amber,
-fontFamily: “inherit”,
-fontSize: 10,
-letterSpacing: 2,
-padding: “8px 16px”,
-borderRadius: 3,
-cursor: “pointer”,
-textTransform: “uppercase”,
-transition: “all 0.2s”,
-},
-signalBadge: (rl) => ({
-display: “inline-flex”,
-alignItems: “center”,
-gap: 6,
-background: rl.bg,
-border: `1px solid ${rl.color}`,
-color: rl.color,
-fontFamily: “inherit”,
-fontSize: 11,
-letterSpacing: 2,
-padding: “6px 12px”,
-borderRadius: 3,
-fontWeight: 700,
-}),
-row: { display:“flex”, alignItems:“center”, gap: 10, marginBottom: 10 },
-};
-
-if (loading) return (
-<div style={{ …S.root, display:“flex”, alignItems:“center”, justifyContent:“center” }}>
-<div style={{ textAlign:“center” }}>
-<div style={{ color: C.amber, fontSize: 11, letterSpacing: 3, marginBottom: 12 }}>LOADING MARKET DATA</div>
-<div style={{ display:“flex”, gap: 6, justifyContent:“center” }}>
-{[0,1,2,3,4].map(i => (
-<div key={i} style={{
-width: 4, height: 20, background: C.amber, borderRadius: 2,
-animation: `loadbar 1s ${i*0.1}s ease infinite alternate`,
-opacity: 0.3,
-}}/>
-))}
-</div>
-</div>
-<style>{`@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap'); @keyframes loadbar { to { opacity:1; transform: scaleY(2); } }`}</style>
-</div>
-);
-
-const rl = riskLabel(data.composite);
-const topSectors = […NSE_SECTORS].sort((a,b) => data.sectors[b].score - data.sectors[a].score);
-
-const parseAiMarkdown = (text) => {
-return text
-.replace(/**(.+?)**/g, `<strong style="color:${C.amber}">$1</strong>`)
-.replace(/^## (.+)$/gm, `<div style="color:${C.cyan};font-size:10px;letter-spacing:2px;margin:12px 0 6px;text-transform:uppercase">$1</div>`)
-.replace(/^- (.+)$/gm, `<div style="display:flex;gap:8px;margin:4px 0"><span style="color:${C.amber}">▸</span><span>$1</span></div>`)
-.replace(/\n\n/g, ‘<div style="margin:8px 0"></div>’)
-.replace(/\n/g, ‘<br>’);
-};
-
-return (
-<div style={S.root}>
-<style>{`@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; } ::-webkit-scrollbar { width: 4px; }  ::-webkit-scrollbar-track { background: ${C.bg}; } ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 2px; } @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} } @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} } @keyframes spin { to{transform:rotate(360deg)} } .factor-row:hover { background: #1a2535 !important; cursor: pointer; } .btn-ai:hover { background: ${C.amber} !important; color: ${C.bg} !important; } .btn-refresh:hover { background: ${C.border} !important; }`}</style>
-
-```
-  {/* HEADER */}
-  <div style={S.header}>
-    <div style={S.logo}>
-      <div style={S.dot}/>
-      <span style={{ color: C.amber, fontWeight:700, fontSize: 13, letterSpacing: 2 }}>
-        NSE RISK MONITOR
-      </span>
-      <span style={{ color: C.muted, fontSize: 10 }}>// INDIA MARKET INTELLIGENCE</span>
+  <!-- HEADER -->
+  <div id="hdr">
+    <div id="hdr-row1">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="live-dot" id="ldot"></div>
+        <span style="color:var(--amber);font-weight:700;font-size:11.5px;letter-spacing:2px">NSE RISK MONITOR</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div id="sig-badge" class="badge">── ──</div>
+        <button class="btn" style="padding:4px 8px;font-size:10px" onclick="openModal()">⚙</button>
+      </div>
     </div>
-    <div style={{ display:"flex", alignItems:"center", gap: 16 }}>
-      <span style={{ color: C.muted, fontSize: 9, letterSpacing: 1 }}>
-        {lastUpdated ? `LAST SYNC  ${lastUpdated.toLocaleTimeString("en-IN")}` : ""}
-      </span>
-      <button className="btn-refresh" style={{ ...S.btn, borderColor: C.border, color: C.dimText }}
-        onClick={loadData}>
-        {refreshing ? "⟳ SYNCING" : "⟳ REFRESH"}
-      </button>
-      <div style={{ ...S.signalBadge(rl) }}>{rl.emoji} SIGNAL: {rl.signal}</div>
+    <div id="ticker-row">
+      <div class="tk"><span class="tk-k">NIFTY 50</span><span class="tk-v" id="tk-nifty">──</span></div>
+      <div class="tk"><span class="tk-k">BANK NIFTY</span><span class="tk-v" id="tk-bnifty">──</span></div>
+      <div class="tk"><span class="tk-k">INDIA VIX</span><span class="tk-v" id="tk-vix">──</span></div>
+      <div class="tk"><span class="tk-k">INR/USD</span><span class="tk-v" id="tk-inr" style="color:var(--cyan)">──</span></div>
+      <div class="tk"><span class="tk-k">UPDATED</span><span class="tk-v" id="tk-upd" style="font-size:11px;color:var(--muted)">──</span></div>
     </div>
   </div>
 
-  {/* BODY GRID */}
-  <div style={S.grid}>
-    {/* SIDEBAR */}
-    <div style={S.sidebar}>
+  <!-- CONTENT -->
+  <div id="content">
 
-      {/* Gauge */}
-      <div style={{ ...S.card, display:"flex", flexDirection:"column", alignItems:"center", padding: "20px 16px" }}>
-        <div style={{ ...S.label, marginBottom: 12 }}>Composite Risk Score</div>
-        <GaugeArc score={data.composite}/>
-        <div style={{ marginTop: 8, display:"flex", flexDirection:"column", alignItems:"center", gap: 4 }}>
-          <div style={{ ...S.signalBadge(rl), fontSize: 10 }}>{rl.signal}</div>
-          <div style={{ color: C.muted, fontSize: 9, marginTop: 4 }}>0 = MAX RISK · 100 = NO RISK</div>
-        </div>
+    <!-- HOME -->
+    <div id="pg-home" class="page on">
+      <div class="card" style="text-align:center">
+        <div class="lbl" style="text-align:center">Composite Risk Score</div>
+        <svg id="gauge" width="220" height="148" viewBox="0 0 220 148" style="display:block;margin:0 auto;overflow:visible">
+          <defs>
+            <filter id="glow"><feGaussianBlur stdDeviation="4" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <path id="g-track" fill="#1a2030"/>
+          <path id="g-fill" fill="#00d084" opacity=".9"/>
+          <path id="g-glow"  fill="#00d084" opacity=".28" filter="url(#glow)"/>
+          <text id="g-score" x="110" y="114" text-anchor="middle" font-size="40" font-weight="700"
+            font-family="'JetBrains Mono',monospace" fill="#e8edf2">──</text>
+          <text id="g-label" x="110" y="132" text-anchor="middle" font-size="9" letter-spacing="2"
+            font-family="'JetBrains Mono',monospace" fill="#5a6a7a">LOADING</text>
+        </svg>
+        <div id="reg-signal" style="font-size:10px;letter-spacing:2px;font-weight:700;color:var(--muted);margin-top:4px">── ──</div>
+        <div style="font-size:7.5px;color:var(--muted);margin-top:4px">0 = MAX RISK · 100 = NO RISK</div>
       </div>
 
-      {/* Market Prices */}
-      <div style={S.card}>
-        <div style={S.label}>Live Indices</div>
-        {[
-          { label:"NIFTY 50",   val:`₹${Number(data.nifty).toLocaleString("en-IN")}`,  color: C.white },
-          { label:"BANK NIFTY", val:`₹${Number(data.bnifty).toLocaleString("en-IN")}`, color: C.white },
-          { label:"INDIA VIX",  val:data.vix, color: parseFloat(data.vix) > 20 ? C.red : parseFloat(data.vix) > 15 ? C.yellow : C.green },
-          { label:"INR / USD",  val:`₹${data.inr}`, color: C.cyan },
-          { label:"10Y G-SEC",  val:`${data.tnY10}%`, color: C.amber },
-        ].map(item => (
-          <div key={item.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding: "7px 0", borderBottom: `1px solid ${C.border}` }}>
-            <span style={{ fontSize: 9, color: C.muted, letterSpacing: 1 }}>{item.label}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: item.color }}>{item.val}</span>
-          </div>
-        ))}
+      <div class="card">
+        <div class="lbl">Risk-Adjusted Position Size</div>
+        <div id="size-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
       </div>
 
-      {/* Position Sizing Guide */}
-      <div style={S.card}>
-        <div style={S.label}>Risk-Adjusted Sizing</div>
-        {[
-          { range:"70-100", label:"Full Size",  pct:"100%", color: C.green },
-          { range:"50-69",  label:"Half Size",  pct:"50%",  color: C.yellow },
-          { range:"35-49",  label:"Minimal",    pct:"25%",  color: C.amber },
-          { range:"0-34",   label:"Flat/Exit",  pct:"0%",   color: C.red },
-        ].map(row => {
-          const active = {
-            "70-100": data.composite >= 70,
-            "50-69":  data.composite >= 50 && data.composite < 70,
-            "35-49":  data.composite >= 35 && data.composite < 50,
-            "0-34":   data.composite < 35,
-          }[row.range];
-          return (
-            <div key={row.range} style={{
-              display:"flex", justifyContent:"space-between", alignItems:"center",
-              padding:"6px 8px", margin:"3px 0", borderRadius: 3,
-              background: active ? `${row.color}18` : "transparent",
-              border: `1px solid ${active ? row.color : "transparent"}`,
-              transition: "all 0.5s",
-            }}>
-              <div>
-                <div style={{ fontSize: 9, color: row.color, letterSpacing: 1 }}>{row.label}</div>
-                <div style={{ fontSize: 8, color: C.muted }}>Score {row.range}</div>
-              </div>
-              <span style={{ fontSize: 16, fontWeight: 700, color: active ? row.color : C.muted }}>{row.pct}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-
-    {/* MAIN */}
-    <div style={S.main}>
-
-      {/* Top row: factors + sparkline */}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap: 16 }}>
-
-        {/* Risk Factors */}
-        <div style={S.card}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 14 }}>
-            <div style={S.label}>Risk Factor Breakdown</div>
-            <div style={{ fontSize: 9, color: C.muted }}>Click a factor for detail</div>
-          </div>
-          {RISK_FACTORS.map(f => {
-            const score = data.rawScores[f.key];
-            const fl = riskLabel(score);
-            const isSelected = selectedFactor === f.key;
-            return (
-              <div key={f.key}
-                className="factor-row"
-                onClick={() => setSelected(isSelected ? null : f.key)}
-                style={{
-                  padding: "10px 8px", borderRadius: 4, marginBottom: 2,
-                  background: isSelected ? "#1a2535" : "transparent",
-                  border: `1px solid ${isSelected ? C.borderHi : "transparent"}`,
-                  transition: "all 0.15s",
-                }}>
-                <div style={{ display:"flex", alignItems:"center", gap: 10 }}>
-                  <div style={{ width: 8, height: 8, borderRadius:"50%", background: fl.color, flexShrink: 0,
-                    boxShadow: `0 0 5px ${fl.color}` }}/>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom: 5 }}>
-                      <span style={{ fontSize: 10, color: C.white, letterSpacing: 0.5 }}>{f.label}</span>
-                      <div style={{ display:"flex", alignItems:"center", gap: 8 }}>
-                        <span style={{ fontSize: 9, color: C.muted }}>wt {f.weight}%</span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: fl.color, minWidth: 28, textAlign:"right" }}>{score}</span>
-                      </div>
-                    </div>
-                    <ScoreBar value={score} color={fl.color}/>
-                  </div>
-                </div>
-                {isSelected && (
-                  <div style={{ marginTop: 8, paddingLeft: 18, fontSize: 9, color: C.dimText, lineHeight: 1.7,
-                    animation: "fadeIn 0.2s ease" }}>
-                    {f.desc} · Current regime: <span style={{color: fl.color}}>{fl.label}</span> · Contribution: {(score * f.weight / 100).toFixed(1)} pts
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Equity Curve + Stats */}
-        <div style={{ display:"flex", flexDirection:"column", gap: 16 }}>
-          <div style={{ ...S.card, flex: 1 }}>
-            <div style={S.label}>Portfolio Equity Curve (30d sim)</div>
-            <div style={{ marginTop: 8 }}>
-              <Sparkline data={data.equity} color={data.equity[29] > 100 ? C.green : C.red} height={80} width={250}/>
-            </div>
-            <div style={{ display:"flex", justifyContent:"space-between", marginTop: 8 }}>
-              <div>
-                <div style={{ fontSize: 8, color: C.muted }}>START</div>
-                <div style={{ fontSize: 11, color: C.white }}>100.00</div>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize: 8, color: C.muted }}>CURRENT</div>
-                <div style={{ fontSize: 11, color: data.equity[29] > 100 ? C.green : C.red, fontWeight:700 }}>
-                  {data.equity[29].toFixed(2)}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div style={{ ...S.card }}>
-            <div style={S.label}>Risk Metrics</div>
-            {[
-              { k:"Max Drawdown", v:`-${(2+Math.random()*5).toFixed(1)}%`, c: C.red },
-              { k:"Sharpe (30d)", v:(0.8+Math.random()*1.2).toFixed(2), c: C.cyan },
-              { k:"Win Rate",    v:`${Math.round(48+Math.random()*12)}%`, c: C.green },
-              { k:"Avg R:R",     v:`1 : ${(1.5+Math.random()*1).toFixed(1)}`, c: C.amber },
-            ].map(m => (
-              <div key={m.k} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0",
-                borderBottom:`1px solid ${C.border}` }}>
-                <span style={{ fontSize: 9, color: C.muted }}>{m.k}</span>
-                <span style={{ fontSize: 11, fontWeight:700, color: m.c }}>{m.v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Sector Heatmap */}
-      <div style={S.card}>
-        <div style={S.label}>Sector Risk Heatmap — NSE</div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap: 8, marginTop: 12 }}>
-          {topSectors.map(s => {
-            const { score, change } = data.sectors[s];
-            const sl = riskLabel(score);
-            return (
-              <div key={s} style={{
-                background: `${sl.color}14`,
-                border: `1px solid ${sl.color}44`,
-                borderRadius: 4, padding: "10px 10px",
-                transition: "all 0.3s",
-              }}>
-                <div style={{ fontSize: 8, color: C.muted, letterSpacing: 1, marginBottom: 6, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{s.toUpperCase()}</div>
-                <div style={{ fontSize: 18, fontWeight:700, color: sl.color }}>{score}</div>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop: 4 }}>
-                  <div style={{ fontSize: 8, color: sl.color }}>{sl.label.split(" ")[0]}</div>
-                  <div style={{ fontSize: 9, color: parseFloat(change) >= 0 ? C.green : C.red }}>
-                    {parseFloat(change) >= 0 ? "+" : ""}{change}%
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* AI Analysis */}
-      <div style={S.card}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 14 }}>
+      <div class="card">
+        <div class="lbl">Data Status</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">
           <div>
-            <div style={S.label}>AI Risk Analysis</div>
-            <div style={{ fontSize: 9, color: C.muted }}>Claude · Quant Risk Analyst · Indian Equity Markets</div>
+            <div style="font-size:9px">Live Prices</div>
+            <div style="font-size:7.5px;color:var(--muted)">Yahoo Finance · CORS proxy chain</div>
           </div>
-          <button className="btn-ai" style={{ ...S.btn }} onClick={runAiAnalysis} disabled={aiLoading}>
-            {aiLoading ? "⟳ ANALYSING..." : "▶ RUN ANALYSIS"}
-          </button>
+          <span id="st-live" style="font-size:9px;color:var(--muted)">Pending</span>
         </div>
-
-        {!aiAnalysis && !aiLoading && !aiError && (
-          <div style={{ textAlign:"center", padding: "30px 0", color: C.muted, fontSize: 10, letterSpacing: 1 }}>
-            ── PRESS "RUN ANALYSIS" FOR AI-POWERED RISK ASSESSMENT ──
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0">
+          <div>
+            <div style="font-size:9px">Daily Risk Factors</div>
+            <div style="font-size:7.5px;color:var(--muted)">GitHub Actions · 6:30 AM &amp; 1:00 PM IST</div>
           </div>
-        )}
-        {aiLoading && (
-          <div style={{ display:"flex", alignItems:"center", gap: 12, padding: "20px 0" }}>
-            <div style={{ width:16, height:16, border:`2px solid ${C.amber}`, borderTopColor:"transparent",
-              borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
-            <span style={{ color: C.muted, fontSize: 10, letterSpacing: 1 }}>PROCESSING MARKET DATA · GENERATING ANALYSIS…</span>
-          </div>
-        )}
-        {aiError && <div style={{ color: C.red, fontSize: 10, padding:"12px 0" }}>{aiError}</div>}
-        {aiAnalysis && (
-          <div style={{ fontSize: 11, lineHeight: 1.8, color: C.white, animation:"fadeIn 0.4s ease" }}
-            dangerouslySetInnerHTML={{ __html: parseAiMarkdown(aiAnalysis) }}/>
-        )}
-      </div>
-
-      {/* Entry/Exit Rules */}
-      <div style={S.card}>
-        <div style={S.label}>Entry / Exit Decision Matrix</div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap: 10, marginTop: 12 }}>
-          {[
-            { score:"70–100", title:"FULL ENTRY", color: C.green,  items:["All sectors eligible","Max position sizing","Swing & futures entries OK","Tight SL allowed"] },
-            { score:"50–69",  title:"SELECTIVE",  color: C.yellow, items:["Strong sectors only","50% sizing","No new high-beta trades","Widen stops"] },
-            { score:"35–49",  title:"DEFENSIVE",  color: C.amber,  items:["Reduce existing","25% sizing max","Hedges recommended","Focus on large caps"] },
-            { score:"0–34",   title:"EXIT / FLAT",color: C.red,    items:["Close all longs","No new entries","Short hedges only","Cash is a position"] },
-          ].map(regime => {
-            const isActive = {
-              "70–100": data.composite >= 70,
-              "50–69":  data.composite >= 50 && data.composite < 70,
-              "35–49":  data.composite >= 35 && data.composite < 50,
-              "0–34":   data.composite < 35,
-            }[regime.score];
-            return (
-              <div key={regime.score} style={{
-                background: isActive ? `${regime.color}15` : "#0d1017",
-                border: `1px solid ${isActive ? regime.color : C.border}`,
-                borderRadius: 4, padding: 12,
-                boxShadow: isActive ? `0 0 16px ${regime.color}22` : "none",
-                transition: "all 0.5s",
-              }}>
-                <div style={{ fontSize: 8, color: C.muted, marginBottom: 4 }}>Score {regime.score}</div>
-                <div style={{ fontSize: 11, fontWeight:700, color: isActive ? regime.color : C.muted,
-                  letterSpacing: 1, marginBottom: 10 }}>
-                  {isActive ? "▶ " : ""}{regime.title}
-                </div>
-                {regime.items.map(item => (
-                  <div key={item} style={{ display:"flex", gap:6, fontSize:9, color: isActive ? C.dimText : C.muted,
-                    marginBottom:4, lineHeight:1.5 }}>
-                    <span style={{color: isActive ? regime.color : C.muted, flexShrink:0}}>▸</span>
-                    <span>{item}</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
+          <span id="st-slow" style="font-size:9px;color:var(--muted)">Pending</span>
         </div>
       </div>
 
+      <div style="display:flex;gap:9px;margin-bottom:12px">
+        <button class="btn btn-a" style="flex:1" onclick="refreshAll()">⟳ REFRESH</button>
+        <button class="btn" style="flex:1;border-color:var(--dim)" onclick="goTab('pg-ai')">▶ ANALYSIS</button>
+      </div>
+    </div>
+
+    <!-- FACTORS -->
+    <div id="pg-factors" class="page">
+      <div class="card">
+        <div class="lbl">Risk Factor Breakdown</div>
+        <div style="font-size:8px;color:var(--muted);margin-bottom:12px">
+          <span class="src-live">LIVE</span> &nbsp;refreshes every 60 s &nbsp;&nbsp;
+          <span class="src-daily">DAILY</span> &nbsp;GitHub Actions 6:30 AM IST
+        </div>
+        <div id="factors-list"></div>
+      </div>
+      <div class="card">
+        <div class="lbl">Score Key</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;justify-content:space-between;font-size:9px"><span>70–100</span><span style="color:var(--green)">LOW RISK — Favourable</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:9px"><span>50–69</span><span style="color:var(--yellow)">MODERATE — Caution</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:9px"><span>35–49</span><span style="color:var(--amber)">ELEVATED — Reduce</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:9px"><span>0–34</span><span style="color:var(--red)">HIGH RISK — Exit</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTORS -->
+    <div id="pg-sectors" class="page">
+      <div class="card">
+        <div class="lbl">NSE Sector Risk Heatmap</div>
+        <div class="sec-grid" id="sec-grid"></div>
+      </div>
+    </div>
+
+    <!-- ANALYSIS / AI -->
+    <div id="pg-ai" class="page">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:11px">
+          <div>
+            <div class="lbl" style="margin-bottom:2px">Risk Analysis</div>
+            <div id="ai-src" style="font-size:7.5px;color:var(--muted)">Rule-based · auto-updates with data</div>
+          </div>
+          <button id="ai-btn" class="btn btn-a" onclick="runAi()" style="font-size:8px;padding:6px 10px">▶ AI ANALYSIS</button>
+        </div>
+        <div id="narr" class="narr"><div style="text-align:center;padding:18px 0;color:var(--muted);font-size:9px;letter-spacing:1px">── LOADING ──</div></div>
+      </div>
+      <div class="card">
+        <div class="lbl">Entry / Exit Matrix</div>
+        <div id="regime-matrix" style="display:flex;flex-direction:column;gap:8px;margin-top:9px"></div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+
+  <!-- BOTTOM TABS -->
+  <div id="tabs">
+    <button class="tab on" id="nav-home" onclick="goTab('pg-home')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12L12 3l9 9M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/></svg>HOME
+    </button>
+    <button class="tab" id="nav-factors" onclick="goTab('pg-factors')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>FACTORS
+    </button>
+    <button class="tab" id="nav-sectors" onclick="goTab('pg-sectors')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>SECTORS
+    </button>
+    <button class="tab" id="nav-ai" onclick="goTab('pg-ai')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>ANALYSIS
+    </button>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div id="modal">
+  <div id="modal-panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+      <span style="font-size:10px;letter-spacing:2px;color:var(--amber)">SETTINGS</span>
+      <button class="btn" onclick="closeModal()" style="padding:3px 7px">✕</button>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="lbl">Anthropic API Key (optional)</div>
+      <div style="font-size:8px;color:var(--muted);margin-bottom:2px">Enables real AI analysis. Stored on your device only — never transmitted.</div>
+      <input class="inp" type="password" id="key-inp" placeholder="sk-ant-api03-..."/>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-a" onclick="saveKey()">SAVE</button>
+        <button class="btn" onclick="clearKey()">CLEAR</button>
+      </div>
+    </div>
+
+    <hr class="div">
+
+    <div style="margin-bottom:14px">
+      <div class="lbl">Auto-Refresh Interval</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:6px">
+        <button class="btn" id="ri-30"  onclick="setRI(30000)">30 s</button>
+        <button class="btn btn-a" id="ri-60" onclick="setRI(60000)">60 s</button>
+        <button class="btn" id="ri-300" onclick="setRI(300000)">5 min</button>
+        <button class="btn" id="ri-0"   onclick="setRI(0)">OFF</button>
+      </div>
+    </div>
+
+    <hr class="div">
+    <div style="font-size:8px;color:var(--muted);line-height:1.8">
+      LIVE (client): Nifty 50 · Bank Nifty · India VIX · INR/USD<br>
+      DAILY (Actions): Breadth · FII proxy · Macro stability · All sectors<br>
+      CORS chain: corsproxy.io → allorigins → codetabs → thingproxy → cors.sh
     </div>
   </div>
 </div>
-```
 
-);
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════════════════════════════════════════════
+const PROXIES = [
+  u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  u => `https://thingproxy.freeboard.io/fetch/${u}`,
+  u => `https://proxy.cors.sh/${u}`,
+];
+
+const YF = "https://query1.finance.yahoo.com/v8/finance/chart";
+
+const FACTOR_META = [
+  { key:"vix",      label:"India VIX",       weight:20, src:"live"  },
+  { key:"trend",    label:"Trend Strength",  weight:20, src:"live"  },
+  { key:"momentum", label:"Price Momentum",  weight:15, src:"live"  },
+  { key:"breadth",  label:"Market Breadth",  weight:15, src:"daily" },
+  { key:"fii",      label:"FII Proxy",       weight:15, src:"daily" },
+  { key:"macro",    label:"Macro Stability", weight:15, src:"daily" },
+];
+
+const REGIMES = [
+  { r:[70,100], title:"FULL ENTRY",  size:"100%", rules:["All sectors eligible","Full position sizing","Swing & futures OK","Tight SL allowed"] },
+  { r:[50,69],  title:"SELECTIVE",   size:"50%",  rules:["Strong sectors only","50% sizing","No high-beta new trades","Widen stops slightly"] },
+  { r:[35,49],  title:"DEFENSIVE",   size:"25%",  rules:["Start reducing existing","25% max sizing","Add hedges","Large-caps only"] },
+  { r:[0,34],   title:"EXIT / FLAT", size:"0%",   rules:["Close all longs","No new entries","Short hedges only","Cash is a position"] },
+];
+
+const SECTOR_NAMES = ["Nifty 50","Bank Nifty","IT","Pharma","Auto","FMCG","Metal","Realty","Energy","Infra"];
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════════════════════
+const S = {
+  live: null, slow: null, slowSectors: null,
+  factors: {}, composite: null,
+  lastLive: null, lastSlow: null,
+  timer: null, timerInterval: 60000,
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// COLOUR HELPERS
+// ══════════════════════════════════════════════════════════════════════════════
+function ri(score) {
+  if (score >= 70) return { c:"#00d084", bg:"rgba(0,208,132,.12)",  lbl:"LOW RISK",  sig:"ENTER",  e:"🟢" };
+  if (score >= 50) return { c:"#ffd32a", bg:"rgba(255,211,42,.12)", lbl:"MODERATE",  sig:"HOLD",   e:"🟡" };
+  if (score >= 35) return { c:"#f5a623", bg:"rgba(245,166,35,.12)", lbl:"ELEVATED",  sig:"REDUCE", e:"🟠" };
+  return               { c:"#ff4757", bg:"rgba(255,71,87,.12)",  lbl:"HIGH RISK", sig:"EXIT",   e:"🔴" };
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FETCH HELPERS
+// ══════════════════════════════════════════════════════════════════════════════
+async function proxyFetch(url, attempt=0) {
+  if (attempt >= PROXIES.length) throw new Error("all proxies failed");
+  try {
+    const r = await fetch(PROXIES[attempt](url), { signal: AbortSignal.timeout(9000) });
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch {
+    return proxyFetch(url, attempt + 1);
+  }
+}
+
+async function yfetch(sym, interval="1d", range="6mo") {
+  const url = `${YF}/${encodeURIComponent(sym)}?interval=${interval}&range=${range}`;
+  const d = await proxyFetch(url);
+  const res = d?.chart?.result?.[0];
+  if (!res) throw new Error(`No data: ${sym}`);
+  const closes = (res.indicators?.quote?.[0]?.close || []).filter(Boolean);
+  return { closes, price: res.meta?.regularMarketPrice ?? closes.at(-1) };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MATH
+// ══════════════════════════════════════════════════════════════════════════════
+function calcEMA(arr, n) {
+  const k = 2/(n+1); let e = arr[0];
+  for (let i=1;i<arr.length;i++) e = arr[i]*k + e*(1-k);
+  return e;
+}
+
+function calcRSI(arr, n=14) {
+  if (arr.length < n+1) return 50;
+  let g=0, l=0;
+  for (let i=arr.length-n; i<arr.length; i++) {
+    const d = arr[i]-arr[i-1];
+    if (d>0) g+=d; else l-=d;
+  }
+  const al = l/n; if (!al) return 100;
+  return 100 - 100/(1+g/n/al);
+}
+
+function clamp(v) { return Math.max(0, Math.min(100, v)); }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FACTOR COMPUTATION (live)
+// ══════════════════════════════════════════════════════════════════════════════
+function vixScore(v) {
+  v = +v;
+  if (v<12)  return 92; if (v<14) return 82; if (v<16) return 70;
+  if (v<18)  return 58; if (v<20) return 46; if (v<25) return 32;
+  if (v<30)  return 18; return 8;
+}
+
+function trendScore(closes) {
+  if (closes.length < 20) return 50;
+  const p = closes.at(-1);
+  const e20  = calcEMA(closes, 20);
+  const e50  = calcEMA(closes.slice(-Math.min(50,closes.length)), 50);
+  const e200 = closes.length>=200 ? calcEMA(closes,200) : calcEMA(closes,closes.length);
+  let s = 0;
+  if (p > e20)  s += 30;
+  if (p > e50)  s += 25;
+  if (p > e200) s += 25;
+  if (e20 > e50)  s += 10;
+  if (e50 > e200) s += 10;
+  return clamp(s);
+}
+
+function momentumScore(closes) {
+  if (closes.length < 21) return 50;
+  const rsiV = calcRSI(closes, 14);
+  const roc  = (closes.at(-1)/closes.at(-21)-1)*100;
+  // RSI map
+  const rsiS = rsiV<30?10 : rsiV<40?28 : rsiV<50?42 : rsiV<60?68 : rsiV<70?78 : rsiV<80?62 : 42;
+  // ROC map
+  const rocS = roc<-10?10 : roc<-5?25 : roc<0?45 : roc<3?65 : roc<7?80 : roc<12?70 : 55;
+  return clamp(Math.round(rsiS*.6 + rocS*.4));
+}
+
+function composite(factors) {
+  return clamp(Math.round(FACTOR_META.reduce((s,f) => s+(factors[f.key]??50)*f.weight/100, 0)));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DATA FETCHING
+// ══════════════════════════════════════════════════════════════════════════════
+async function fetchLive() {
+  try {
+    const [nD,bD,vD,iD] = await Promise.all([
+      yfetch("^NSEI",    "1d","6mo"),
+      yfetch("^NSEBANK", "1d","5d"),
+      yfetch("^INDIAVIX","1d","1mo"),
+      yfetch("USDINR=X", "1d","5d"),
+    ]);
+    const nc = nD.closes.filter(Boolean);
+    S.live = { nifty:nD.price, bnifty:bD.price, vix:vD.price, inr:iD.price, niftyHist:nc };
+    S.lastLive = new Date();
+    S.factors.vix      = vixScore(vD.price);
+    S.factors.trend    = trendScore(nc);
+    S.factors.momentum = momentumScore(nc);
+    q("st-live").textContent = "✓ Live";
+    q("st-live").style.color = "#00d084";
+    return true;
+  } catch(e) {
+    console.error("Live fetch:", e);
+    q("st-live").textContent = "⚠ Retry";
+    q("st-live").style.color = "#ff4757";
+    return false;
+  }
+}
+
+async function fetchSlow() {
+  try {
+    const r = await fetch(`./data/risk_factors.json?t=${Date.now()}`);
+    if (!r.ok) throw new Error("not found");
+    const j = await r.json();
+    S.slow = j; S.lastSlow = new Date();
+    S.factors.breadth = j.factors?.breadth?.score ?? 55;
+    S.factors.fii     = j.factors?.fii_proxy?.score ?? 50;
+    S.factors.macro   = j.factors?.macro?.score ?? 60;
+    if (j.sectors) S.slowSectors = j.sectors;
+    const ts = j.generated_at?.slice(0,16).replace("T"," ") ?? "?";
+    q("st-slow").textContent = `✓ ${ts} UTC`;
+    q("st-slow").style.color = "#f5a623";
+    return true;
+  } catch {
+    S.factors.breadth = 55; S.factors.fii = 50; S.factors.macro = 60;
+    q("st-slow").textContent = "⚠ Using seed";
+    q("st-slow").style.color = "#f5a623";
+    return false;
+  }
+}
+
+async function refreshAll() {
+  q("ldot").style.animation = "blink .5s infinite";
+  await Promise.all([fetchLive(), fetchSlow()]);
+  S.composite = composite(S.factors);
+  renderAll();
+  q("ldot").style.animation = "pulse 2s infinite";
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GAUGE SVG
+// ══════════════════════════════════════════════════════════════════════════════
+function arcPath(cx,cy,ro,ri2,d1,d2) {
+  function xy(deg,r){ const rd=deg*Math.PI/180; return [cx+r*Math.cos(rd), cy+r*Math.sin(rd)]; }
+  const [x1,y1]=xy(d1,ro),[x2,y2]=xy(d2,ro),[x3,y3]=xy(d2,ri2),[x4,y4]=xy(d1,ri2);
+  const lg = d2-d1>180?1:0;
+  return `M${x1} ${y1} A${ro} ${ro} 0 ${lg} 1 ${x2} ${y2} L${x3} ${y3} A${ri2} ${ri2} 0 ${lg} 0 ${x4} ${y4}Z`;
+}
+
+function drawGauge(score) {
+  const cx=110,cy=105,ro=82,ri2=64,d0=-205,sw=230;
+  const track = arcPath(cx,cy,ro,ri2,d0,d0+sw);
+  q("g-track").setAttribute("d",track);
+  const inf = ri(score);
+  const sweep = (score/100)*sw;
+  const fp = sweep>0 ? arcPath(cx,cy,ro,ri2,d0,d0+sweep) : "";
+  ["g-fill","g-glow"].forEach(id=>{ q(id).setAttribute("d",fp); q(id).setAttribute("fill",inf.c); });
+  q("g-score").textContent = score;
+  q("g-score").setAttribute("fill", inf.c);
+  q("g-label").textContent = inf.lbl;
+  q("g-label").setAttribute("fill", inf.c);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RENDER
+// ══════════════════════════════════════════════════════════════════════════════
+function renderHome() {
+  const score = S.composite; if (score===null) return;
+  const inf = ri(score);
+  drawGauge(score);
+
+  // Signal badge
+  const sb = q("sig-badge");
+  sb.textContent = `${inf.e} ${inf.sig}`;
+  sb.style.color = inf.c; sb.style.borderColor = inf.c; sb.style.background = inf.bg;
+  q("reg-signal").textContent = `${inf.e} SIGNAL: ${inf.sig}`;
+  q("reg-signal").style.color = inf.c;
+
+  // Tickers
+  const L = S.live||{};
+  const fmt = (v,dec=2) => v!=null ? (+v).toLocaleString("en-IN",{minimumFractionDigits:dec,maximumFractionDigits:dec}) : "──";
+  q("tk-nifty").textContent  = L.nifty  ? `₹${fmt(L.nifty)}` : "──";
+  q("tk-bnifty").textContent = L.bnifty ? `₹${fmt(L.bnifty)}` : "──";
+  if (L.vix!=null) {
+    const vv = +L.vix;
+    q("tk-vix").textContent = vv.toFixed(2);
+    q("tk-vix").style.color = vv>20?"#ff4757":vv>15?"#ffd32a":"#00d084";
+  }
+  q("tk-inr").textContent = L.inr ? `₹${fmt(L.inr)}` : "──";
+  if (S.lastLive) q("tk-upd").textContent = S.lastLive.toLocaleTimeString("en-IN");
+
+  // Sizing grid
+  q("size-grid").innerHTML = REGIMES.map(reg => {
+    const active = score>=reg.r[0] && score<=reg.r[1];
+    const c = active ? inf.c : "#5a6a7a";
+    return `<div style="background:${active?inf.bg:"#0d1017"};border:1px solid ${active?inf.c:"var(--border)"};border-radius:4px;padding:10px;transition:all .4s;box-shadow:${active?`0 0 12px ${inf.c}22`:"none"}">
+      <div style="font-size:7.5px;color:var(--muted)">${reg.r[0]}–${reg.r[1]}</div>
+      <div style="font-size:10px;font-weight:700;color:${c};margin:4px 0;letter-spacing:1px">${active?"▶ ":""}${reg.title}</div>
+      <div style="font-size:18px;font-weight:700;color:${c}">${reg.size}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderFactors() {
+  q("factors-list").innerHTML = FACTOR_META.map(f => {
+    const score = S.factors[f.key]??50;
+    const c = ri(score).c;
+    const srcTag = f.src==="live"
+      ? `<span class="src-live">LIVE</span>` : `<span class="src-daily">DAILY</span>`;
+
+    // Extra raw detail
+    let detail = "";
+    const raw = S.slow?.factors;
+    if (f.key==="vix" && S.live?.vix) detail = `VIX: ${(+S.live.vix).toFixed(2)} · `;
+    if (f.key==="trend" && S.live?.niftyHist?.length) {
+      const e20 = calcEMA(S.live.niftyHist,20);
+      detail = `EMA20: ₹${Math.round(e20).toLocaleString("en-IN")} · `;
+    }
+    if (f.key==="momentum" && S.live?.niftyHist?.length) {
+      const r = calcRSI(S.live.niftyHist,14);
+      detail = `RSI(14): ${r.toFixed(1)} · `;
+    }
+    if (f.key==="breadth" && raw?.breadth?.raw) detail = `${raw.breadth.raw.pct_above_20ma}% above 20-MA · `;
+    if (f.key==="fii"     && raw?.fii_proxy?.raw) detail = `INR 20d Δ: ${raw.fii_proxy.raw.inr_20d_chg_pct}% · `;
+    if (f.key==="macro"   && raw?.macro?.raw) detail = `VIX 20d avg: ${raw.macro.raw.vix_20d_avg} · `;
+
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <div style="width:7px;height:7px;border-radius:50%;background:${c};box-shadow:0 0 5px ${c};flex-shrink:0"></div>
+        <span style="font-size:10px;flex:1">${f.label}</span>
+        ${srcTag}
+        <span style="font-size:8.5px;color:var(--muted)">wt ${f.weight}%</span>
+        <span style="font-size:14px;font-weight:700;color:${c};min-width:26px;text-align:right">${score}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="bar-bg"><div class="bar-fill" style="width:${score}%;background:${c};box-shadow:0 0 5px ${c}88"></div></div>
+      </div>
+      <div style="font-size:8px;color:var(--muted);margin-top:4px">${detail}Contrib: ${(score*f.weight/100).toFixed(1)} pts</div>
+    </div>`;
+  }).join("");
+}
+
+function renderSectors() {
+  const sectors = S.slowSectors || {};
+  q("sec-grid").innerHTML = SECTOR_NAMES.map(name => {
+    const d = sectors[name];
+    const score = d?.score ?? 50;
+    const inf2 = ri(score);
+    const chg = d?.change_1d ?? 0;
+    const chgStr = (+chg>=0?"+":"")+Number(chg).toFixed(2)+"%";
+    const chgCol = +chg>=0?"#00d084":"#ff4757";
+    return `<div style="background:${inf2.bg};border:1px solid ${inf2.c}44;border-radius:4px;padding:11px 10px">
+      <div style="font-size:7.5px;color:var(--muted);letter-spacing:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name.toUpperCase()}</div>
+      <div style="font-size:22px;font-weight:700;color:${inf2.c};margin:4px 0">${score}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:7.5px;color:${inf2.c}">${score>=70?"LOW":score>=50?"MOD":score>=35?"ELEV":"HIGH"}</div>
+        <div style="font-size:9px;color:${chgCol}">${chgStr}</div>
+      </div>
+      ${d?.rsi?`<div style="font-size:7.5px;color:var(--muted);margin-top:2px">RSI ${d.rsi}</div>`:""}
+    </div>`;
+  }).join("");
+}
+
+function renderNarrative() {
+  const score = S.composite; if (score===null) return;
+  const inf = ri(score);
+  const f = S.factors;
+  const L = S.live||{};
+  const raw = S.slow?.factors;
+
+  const vixV = L.vix ? +L.vix : null;
+  const vixTxt = vixV==null ? "India VIX data pending." :
+    vixV<15 ? "India VIX is subdued — market fear is low." :
+    vixV<20 ? `India VIX at ${vixV.toFixed(1)} signals moderate market anxiety.` :
+              `India VIX elevated at ${vixV.toFixed(1)} — significant stress present.`;
+
+  const ts = f.trend??50;
+  const trendTxt = ts>=70 ? "Nifty 50 is above key EMAs — trend is bullish." :
+    ts>=50 ? "Nifty is holding above some EMAs — trend is mixed." :
+             "Nifty is below key moving averages — trend is bearish.";
+
+  const bs = f.breadth??50;
+  const br = raw?.breadth?.raw;
+  const breadthTxt = br
+    ? `${br.pct_above_20ma}% of sampled large-caps are above their 20-day MA — ${bs>=65?"broad participation.":bs>=45?"selective participation.":"weak internals."}`
+    : (bs>=65?"Market breadth is healthy." : bs>=45?"Breadth is mixed — selective participation." : "Breadth is weak — internals deteriorating.");
+
+  const fiiS = f.fii??50;
+  const fiiTxt = fiiS>=65 ? "FII proxy signals net inflows — foreign money is risk-on." :
+    fiiS>=45 ? "FII proxy is neutral — no clear directional pressure." :
+               "FII proxy suggests outflows — INR weakness and risk-off positioning.";
+
+  const ms = f.macro??50;
+  const macroTxt = ms>=65 ? "Macro backdrop is stable — INR and VIX contained." :
+    ms>=45 ? "Macro shows some strain but remains manageable." :
+             "Macro headwinds present — INR under pressure or volatility elevated.";
+
+  const actionTxt = score>=70
+    ? `At <strong>${score}/100</strong>, conditions favour <strong>full position sizing</strong>. Focus on sectors scoring 65+. Maintain existing longs with disciplined stops.`
+    : score>=50
+    ? `At <strong>${score}/100</strong>, be <strong>selective</strong>. Deploy 50% of normal size into high-scoring sectors only. Avoid high-beta and new speculative entries.`
+    : score>=35
+    ? `At <strong>${score}/100</strong>, adopt a <strong>defensive stance</strong>. Reduce exposure to 25% sizing. Focus on Nifty 50 heavyweights and FMCG. Add index hedges.`
+    : `At <strong>${score}/100</strong>, the model signals <strong>EXIT or FLAT</strong>. Close longs, preserve capital. No new long entries until composite recovers above 40.`;
+
+  const risks = [];
+  if (vixV && vixV>18) risks.push("VIX above 18 — stop-loss cascade risk on any bad news");
+  if (ts<50) risks.push("Nifty below key EMAs — watch for 200 EMA breakdown confirmation");
+  if (bs<45) risks.push("Weak breadth — rally narrowing to heavyweights, participation falling");
+  if (fiiS<45) risks.push("FII outflow proxy elevated — monitor INR/USD for acceleration");
+  if (ms<45) risks.push("Macro headwinds — INR weakness amplifies FII selling pressure");
+  risks.push("Global risk-off (Fed surprise, geopolitical event, EM contagion)");
+  risks.push("Nifty Bank earnings miss — sector most sensitive to NII guidance");
+
+  q("narr").innerHTML = `
+    <div class="sh">Market Assessment</div>
+    <div style="margin-bottom:8px">${vixTxt} ${trendTxt} ${breadthTxt}</div>
+    <div class="sh">Investment Action</div>
+    <div style="margin-bottom:8px">${actionTxt}</div>
+    <div class="sh">Key Risks to Watch</div>
+    ${risks.slice(0,4).map(r=>`<div class="bul"><span style="color:var(--amber);flex-shrink:0">▸</span><span style="font-size:10px">${r}</span></div>`).join("")}
+  `;
+}
+
+function renderRegime() {
+  const score = S.composite; if (score===null) return;
+  const inf = ri(score);
+  q("regime-matrix").innerHTML = REGIMES.map(reg => {
+    const active = score>=reg.r[0] && score<=reg.r[1];
+    const c = ri((reg.r[0]+reg.r[1])/2).c;
+    return `<div style="background:${active?`${c}18`:"#0d1017"};border:1px solid ${active?c:"var(--border)"};border-radius:4px;padding:12px;box-shadow:${active?`0 0 14px ${c}20`:"none"};transition:all .5s">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-size:7.5px;color:var(--muted)">Score ${reg.r[0]}–${reg.r[1]}</div>
+          <div style="font-size:10.5px;font-weight:700;color:${active?c:"var(--muted)"};letter-spacing:1px;margin-top:2px">${active?"▶ ":""}${reg.title}</div>
+        </div>
+        <div style="font-size:20px;font-weight:700;color:${active?c:"var(--muted)"}">${reg.size}</div>
+      </div>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px">
+        ${reg.rules.map(r=>`<div style="display:flex;gap:6px;font-size:8.5px;color:${active?"var(--dim)":"var(--muted)"}"><span style="color:${active?c:"var(--muted)"};flex-shrink:0">▸</span>${r}</div>`).join("")}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function renderAll() {
+  renderHome(); renderFactors(); renderSectors(); renderNarrative(); renderRegime();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AI ANALYSIS (optional — requires Anthropic API key in settings)
+// ══════════════════════════════════════════════════════════════════════════════
+async function runAi() {
+  const key = localStorage.getItem("risk_api_key");
+  if (!key) { openModal(); return; }
+  const btn = q("ai-btn");
+  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Thinking…`;
+  const score = S.composite ?? 50;
+  const f = S.factors;
+  const L = S.live||{};
+  const prompt = `You are a senior quant risk analyst for NSE/BSE Indian markets.
+
+COMPOSITE RISK SCORE: ${score}/100  SIGNAL: ${ri(score).sig}
+${FACTOR_META.map(fm=>`${fm.label}: ${f[fm.key]??50}/100 (${fm.src})`).join(" | ")}
+Nifty: ₹${L.nifty??("+N/A")} | VIX: ${L.vix??"N/A"} | INR: ${L.inr??"N/A"}
+
+Respond in exactly 3 labelled sections:
+1. **Market Assessment** (2–3 sentences, data-driven, no fluff)
+2. **Investment Action** (2–3 sentences, what to do TODAY)
+3. **Key Risks** (3–4 bullet points with specific triggers)`;
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:550,messages:[{role:"user",content:prompt}]}),
+    });
+    const data = await res.json();
+    const text = data.content?.find(b=>b.type==="text")?.text || "";
+    const html = text
+      .replace(/\*\*(.+?)\*\*/g,`<strong>$1</strong>`)
+      .replace(/^#{1,3}\s(.+)$/gm,`<div class="sh">$1</div>`)
+      .replace(/^\d+\.\s\*\*(.+?)\*\*(.*)$/gm,`<div class="sh">$1</div><div style="margin-bottom:6px">$2</div>`)
+      .replace(/^[-•]\s(.+)$/gm,`<div class="bul"><span style="color:var(--amber);flex-shrink:0">▸</span><span style="font-size:10px">$1</span></div>`)
+      .replace(/\n\n/g,'<div style="margin:5px 0"></div>');
+    q("narr").innerHTML = html;
+    q("ai-src").textContent = `Claude AI · ${new Date().toLocaleTimeString("en-IN")}`;
+  } catch(e) {
+    q("narr").innerHTML = `<div style="color:var(--red);font-size:10px">AI call failed: ${e.message}</div>`;
+  }
+  btn.disabled = false; btn.textContent = "▶ AI ANALYSIS";
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SETTINGS + NAV
+// ══════════════════════════════════════════════════════════════════════════════
+function openModal() {
+  const k = localStorage.getItem("risk_api_key");
+  q("key-inp").value = k ? "sk-ant-..." : "";
+  q("modal").classList.add("on");
+}
+function closeModal() { q("modal").classList.remove("on"); }
+function saveKey() {
+  const v = q("key-inp").value.trim();
+  if (v && v!=="sk-ant-...") { localStorage.setItem("risk_api_key",v); closeModal(); q("ai-src").textContent="Claude AI · Key configured"; }
+}
+function clearKey() { localStorage.removeItem("risk_api_key"); q("key-inp").value=""; }
+
+function setRI(ms) {
+  S.timerInterval=ms; if (S.timer) clearInterval(S.timer);
+  if (ms>0) S.timer = setInterval(async()=>{ await fetchLive(); S.composite=composite(S.factors); renderAll(); }, ms);
+  ["ri-30","ri-60","ri-300","ri-0"].forEach(id=>q(id).classList.remove("btn-a"));
+  const map={30000:"ri-30",60000:"ri-60",300000:"ri-300",0:"ri-0"};
+  if (map[ms]) q(map[ms]).classList.add("btn-a");
+}
+
+function goTab(pageId) {
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("on"));
+  document.querySelectorAll(".tab").forEach(b=>b.classList.remove("on"));
+  q(pageId).classList.add("on");
+  const navId = "nav-"+pageId.replace("pg-","");
+  if (q(navId)) q(navId).classList.add("on");
+  q("content").scrollTop=0;
+}
+
+q("modal").addEventListener("click",e=>{ if(e.target===q("modal")) closeModal(); });
+
+function q(id){ return document.getElementById(id); }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════════════════
+async function init() {
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
+  await Promise.all([fetchLive(), fetchSlow()]);
+  S.composite = composite(S.factors);
+  renderAll();
+  // Start auto-refresh (live only)
+  S.timer = setInterval(async()=>{
+    await fetchLive();
+    S.composite = composite(S.factors);
+    renderAll();
+  }, S.timerInterval);
+}
+
+init();
+</script>
+</body>
+</html>
