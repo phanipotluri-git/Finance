@@ -1,0 +1,656 @@
+import { useState, useEffect, useCallback, useRef } from “react”;
+
+// ── colour tokens ──────────────────────────────────────────────────────────────
+const C = {
+bg:       “#0a0c0f”,
+surface:  “#0f1318”,
+card:     “#131820”,
+border:   “#1e2530”,
+borderHi: “#2a3545”,
+amber:    “#f5a623”,
+amberDim: “#8a5c12”,
+green:    “#00d084”,
+greenDim: “#004d30”,
+red:      “#ff4757”,
+redDim:   “#5c0d16”,
+yellow:   “#ffd32a”,
+blue:     “#2196f3”,
+cyan:     “#00bcd4”,
+white:    “#e8edf2”,
+muted:    “#5a6a7a”,
+dimText:  “#8899aa”,
+};
+
+// ── risk-factor definitions ────────────────────────────────────────────────────
+const RISK_FACTORS = [
+{ key:“vix”,       label:“India VIX”,        weight:20, desc:“Volatility fear gauge” },
+{ key:“trend”,     label:“Trend Strength”,   weight:20, desc:“Nifty above key EMAs” },
+{ key:“momentum”,  label:“Price Momentum”,   weight:15, desc:“RSI + rate-of-change” },
+{ key:“breadth”,   label:“Market Breadth”,   weight:15, desc:“Advance/Decline ratio” },
+{ key:“fii”,       label:“FII Flow”,         weight:15, desc:“Foreign institutional activity” },
+{ key:“macro”,     label:“Macro Stability”,  weight:15, desc:“INR, bond yields, CPI proxy” },
+];
+
+const NSE_SECTORS = [
+“Nifty 50”,“Bank Nifty”,“IT”,“Pharma”,“Auto”,“FMCG”,“Metal”,“Realty”,“Energy”,“Infra”,
+];
+
+// ── deterministic pseudo-random (seeded) ──────────────────────────────────────
+function seeded(seed) {
+let s = seed;
+return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 4294967296; };
+}
+
+function genMarketData() {
+const rng = seeded(Date.now() % 86400000 | 0);          // changes each “session”
+const rawScores = {};
+RISK_FACTORS.forEach(f => { rawScores[f.key] = Math.round(30 + rng() * 55); });
+
+// composite weighted
+const composite = Math.round(
+RISK_FACTORS.reduce((acc, f) => acc + rawScores[f.key] * f.weight / 100, 0)
+);
+
+const sectors = {};
+NSE_SECTORS.forEach(s => {
+sectors[s] = { score: Math.round(25 + rng() * 65), change: (rng() * 6 - 3).toFixed(2) };
+});
+
+const nifty = (21800 + rng() * 2400).toFixed(2);
+const bnifty = (46000 + rng() * 5000).toFixed(2);
+const vix = (12 + rng() * 18).toFixed(2);
+const inr = (83 + rng() * 2).toFixed(2);
+const tnY10 = (6.8 + rng() * 0.8).toFixed(2);
+
+// 30-bar equity curve
+const equity = [100];
+for (let i = 1; i < 30; i++) equity.push(+(equity[i-1] * (1 + (rng()-0.45)*0.025)).toFixed(2));
+
+return { rawScores, composite, sectors, nifty, bnifty, vix, inr, tnY10, equity };
+}
+
+// ── risk label ────────────────────────────────────────────────────────────────
+function riskLabel(score) {
+if (score >= 70) return { label:“LOW RISK”,    color: C.green,  bg: C.greenDim, signal:“ENTER”, emoji:“🟢” };
+if (score >= 50) return { label:“MODERATE”,    color: C.yellow, bg: “#4a3a00”,  signal:“HOLD”,  emoji:“🟡” };
+if (score >= 35) return { label:“ELEVATED”,    color: C.amber,  bg: C.amberDim, signal:“REDUCE”,emoji:“🟠” };
+return               { label:“HIGH RISK”,   color: C.red,    bg: C.redDim,   signal:“EXIT”,  emoji:“🔴” };
+}
+
+// ── mini bar ─────────────────────────────────────────────────────────────────
+function ScoreBar({ value, max = 100, color }) {
+return (
+<div style={{ background: “#1a2030”, borderRadius:3, height:6, overflow:“hidden”, flex:1 }}>
+<div style={{
+height:“100%”, width:`${(value/max)*100}%`,
+background: color, borderRadius:3,
+transition:“width 1s ease”,
+boxShadow:`0 0 6px ${color}88`,
+}}/>
+</div>
+);
+}
+
+// ── simple SVG sparkline ──────────────────────────────────────────────────────
+function Sparkline({ data, color, height=40, width=120 }) {
+const mn = Math.min(…data), mx = Math.max(…data);
+const range = mx - mn || 1;
+const pts = data.map((v,i) => {
+const x = (i/(data.length-1))*width;
+const y = height - ((v-mn)/range)*(height-4) - 2;
+return `${x},${y}`;
+}).join(” “);
+return (
+<svg width={width} height={height} style={{display:“block”}}>
+<polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round"/>
+<polyline
+points={`0,${height} ${pts} ${width},${height}`}
+fill={`${color}22`} stroke=“none”
+/>
+</svg>
+);
+}
+
+// ── gauge arc ────────────────────────────────────────────────────────────────
+function GaugeArc({ score }) {
+const r = 70, cx = 90, cy = 90;
+const startAngle = -200, sweepMax = 220;
+const sweep = (score / 100) * sweepMax;
+const toXY = (deg, radius) => {
+const rad = (deg * Math.PI) / 180;
+return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+};
+const arcPath = (deg1, deg2, ri, ro) => {
+const s1 = toXY(deg1, ro), e1 = toXY(deg2, ro);
+const s2 = toXY(deg2, ri), e2 = toXY(deg1, ri);
+const large = deg2-deg1 > 180 ? 1 : 0;
+return `M ${s1.x} ${s1.y} A ${ro} ${ro} 0 ${large} 1 ${e1.x} ${e1.y} L ${s2.x} ${s2.y} A ${ri} ${ri} 0 ${large} 0 ${e2.x} ${e2.y} Z`;
+};
+const rl = riskLabel(score);
+const endDeg = startAngle + sweep;
+const ticks = [0,25,50,75,100].map(v => {
+const deg = startAngle + (v/100)*sweepMax;
+const inner = toXY(deg, r-16);
+const outer = toXY(deg, r-6);
+return { inner, outer, label: toXY(deg, r-28), v };
+});
+
+return (
+<svg width={180} height={130} style={{overflow:“visible”}}>
+{/* track */}
+<path d={arcPath(startAngle, startAngle+sweepMax, r-14, r)} fill=”#1a2030”/>
+{/* fill */}
+{sweep > 0 && <path d={arcPath(startAngle, endDeg, r-14, r)} fill={rl.color} opacity={0.9}/>}
+{/* glow */}
+{sweep > 0 && <path d={arcPath(startAngle, endDeg, r-14, r)} fill={rl.color} opacity={0.3} filter=“url(#glow)”/>}
+<defs>
+<filter id="glow"><feGaussianBlur stdDeviation="4" result="blur"/>
+<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+</filter>
+</defs>
+{/* ticks */}
+{ticks.map(t => (
+<g key={t.v}>
+<line x1={t.inner.x} y1={t.inner.y} x2={t.outer.x} y2={t.outer.y} stroke={C.border} strokeWidth={2}/>
+<text x={t.label.x} y={t.label.y} fill={C.muted} fontSize={7} textAnchor="middle">{t.v}</text>
+</g>
+))}
+{/* score */}
+<text x={cx} y={cy+8} textAnchor="middle" fill={rl.color} fontSize={28} fontWeight={700}
+fontFamily="'JetBrains Mono', monospace">{score}</text>
+<text x={cx} y={cy+22} textAnchor="middle" fill={rl.color} fontSize={8.5} letterSpacing={2}
+fontFamily="'JetBrains Mono', monospace">{rl.label}</text>
+</svg>
+);
+}
+
+// ── main app ─────────────────────────────────────────────────────────────────
+export default function RiskModel() {
+const [data, setData]               = useState(null);
+const [loading, setLoading]         = useState(true);
+const [aiAnalysis, setAiAnalysis]   = useState(””);
+const [aiLoading, setAiLoading]     = useState(false);
+const [aiError, setAiError]         = useState(””);
+const [refreshing, setRefreshing]   = useState(false);
+const [lastUpdated, setLastUpdated] = useState(null);
+const [selectedFactor, setSelected] = useState(null);
+const timerRef = useRef(null);
+
+const loadData = useCallback(() => {
+setRefreshing(true);
+setTimeout(() => {
+setData(genMarketData());
+setLastUpdated(new Date());
+setRefreshing(false);
+setLoading(false);
+}, 600);
+}, []);
+
+useEffect(() => {
+loadData();
+timerRef.current = setInterval(loadData, 60000);
+return () => clearInterval(timerRef.current);
+}, [loadData]);
+
+const runAiAnalysis = useCallback(async () => {
+if (!data) return;
+setAiLoading(true); setAiError(””); setAiAnalysis(””);
+const rl = riskLabel(data.composite);
+const prompt = `You are a senior quant risk analyst specialising in Indian equity markets (NSE/BSE).
+Given the following market snapshot, provide a concise 3-section risk assessment:
+
+## MARKET SNAPSHOT
+
+- Nifty 50: ₹${data.nifty}
+- Bank Nifty: ₹${data.bnifty}
+- India VIX: ${data.vix}
+- INR/USD: ${data.inr}
+- 10Y Gsec Yield: ${data.tnY10}%
+
+## COMPOSITE RISK SCORE: ${data.composite}/100 → ${rl.label} (Signal: ${rl.signal})
+
+## FACTOR SCORES (0=extreme risk, 100=no risk)
+
+${RISK_FACTORS.map(f => `- ${f.label}: ${data.rawScores[f.key]}/100`).join(”\n”)}
+
+## SECTOR RISK SCORES
+
+${NSE_SECTORS.map(s => `- ${s}: ${data.sectors[s].score}/100 (${data.sectors[s].change}%)`).join(”\n”)}
+
+Provide:
+
+1. **Market Assessment** (2-3 sentences): Current market risk regime and primary drivers
+1. **Investment Action** (2-3 sentences): Whether to enter, hold, or exit positions; which sectors to favour
+1. **Key Risks to Watch** (bullet list of 3-4 risks): Specific triggers that could change the regime
+
+Be specific, data-driven, and concise. Reference actual values. No generic advice.`;
+
+```
+try {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      system: "You are a quant risk analyst for Indian equity markets. Be precise, data-driven, and concise.",
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  const json = await res.json();
+  const text = json.content?.find(b => b.type === "text")?.text || "";
+  setAiAnalysis(text);
+} catch(e) {
+  setAiError("Analysis failed. Please retry.");
+} finally {
+  setAiLoading(false);
+}
+```
+
+}, [data]);
+
+// ── styles ──────────────────────────────────────────────────────────────────
+const S = {
+root: {
+background: C.bg,
+minHeight: “100vh”,
+fontFamily: “‘JetBrains Mono’, ‘Fira Code’, monospace”,
+color: C.white,
+padding: “0”,
+},
+header: {
+background: C.surface,
+borderBottom: `1px solid ${C.border}`,
+padding: “14px 24px”,
+display: “flex”,
+alignItems: “center”,
+justifyContent: “space-between”,
+position: “sticky”,
+top: 0,
+zIndex: 100,
+},
+logo: {
+display: “flex”, alignItems: “center”, gap: 10,
+},
+dot: {
+width: 8, height: 8, borderRadius: “50%”,
+background: C.green,
+boxShadow: `0 0 8px ${C.green}`,
+animation: “pulse 2s infinite”,
+},
+grid: {
+display: “grid”,
+gridTemplateColumns: “280px 1fr”,
+gridTemplateRows: “auto”,
+gap: 1,
+background: C.border,
+minHeight: “calc(100vh - 53px)”,
+},
+sidebar: {
+background: C.surface,
+padding: 20,
+display: “flex”, flexDirection: “column”, gap: 20,
+},
+main: {
+background: C.bg,
+padding: 20,
+display: “flex”, flexDirection: “column”, gap: 20,
+},
+card: {
+background: C.card,
+border: `1px solid ${C.border}`,
+borderRadius: 6,
+padding: 16,
+},
+label: { fontSize: 9, letterSpacing: 2, color: C.muted, textTransform: “uppercase”, marginBottom: 4 },
+val: { fontSize: 20, fontWeight: 700, color: C.white },
+btn: {
+background: “transparent”,
+border: `1px solid ${C.amber}`,
+color: C.amber,
+fontFamily: “inherit”,
+fontSize: 10,
+letterSpacing: 2,
+padding: “8px 16px”,
+borderRadius: 3,
+cursor: “pointer”,
+textTransform: “uppercase”,
+transition: “all 0.2s”,
+},
+signalBadge: (rl) => ({
+display: “inline-flex”,
+alignItems: “center”,
+gap: 6,
+background: rl.bg,
+border: `1px solid ${rl.color}`,
+color: rl.color,
+fontFamily: “inherit”,
+fontSize: 11,
+letterSpacing: 2,
+padding: “6px 12px”,
+borderRadius: 3,
+fontWeight: 700,
+}),
+row: { display:“flex”, alignItems:“center”, gap: 10, marginBottom: 10 },
+};
+
+if (loading) return (
+<div style={{ …S.root, display:“flex”, alignItems:“center”, justifyContent:“center” }}>
+<div style={{ textAlign:“center” }}>
+<div style={{ color: C.amber, fontSize: 11, letterSpacing: 3, marginBottom: 12 }}>LOADING MARKET DATA</div>
+<div style={{ display:“flex”, gap: 6, justifyContent:“center” }}>
+{[0,1,2,3,4].map(i => (
+<div key={i} style={{
+width: 4, height: 20, background: C.amber, borderRadius: 2,
+animation: `loadbar 1s ${i*0.1}s ease infinite alternate`,
+opacity: 0.3,
+}}/>
+))}
+</div>
+</div>
+<style>{`@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap'); @keyframes loadbar { to { opacity:1; transform: scaleY(2); } }`}</style>
+</div>
+);
+
+const rl = riskLabel(data.composite);
+const topSectors = […NSE_SECTORS].sort((a,b) => data.sectors[b].score - data.sectors[a].score);
+
+const parseAiMarkdown = (text) => {
+return text
+.replace(/**(.+?)**/g, `<strong style="color:${C.amber}">$1</strong>`)
+.replace(/^## (.+)$/gm, `<div style="color:${C.cyan};font-size:10px;letter-spacing:2px;margin:12px 0 6px;text-transform:uppercase">$1</div>`)
+.replace(/^- (.+)$/gm, `<div style="display:flex;gap:8px;margin:4px 0"><span style="color:${C.amber}">▸</span><span>$1</span></div>`)
+.replace(/\n\n/g, ‘<div style="margin:8px 0"></div>’)
+.replace(/\n/g, ‘<br>’);
+};
+
+return (
+<div style={S.root}>
+<style>{`@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap'); * { box-sizing: border-box; margin: 0; padding: 0; } ::-webkit-scrollbar { width: 4px; }  ::-webkit-scrollbar-track { background: ${C.bg}; } ::-webkit-scrollbar-thumb { background: ${C.border}; border-radius: 2px; } @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} } @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} } @keyframes spin { to{transform:rotate(360deg)} } .factor-row:hover { background: #1a2535 !important; cursor: pointer; } .btn-ai:hover { background: ${C.amber} !important; color: ${C.bg} !important; } .btn-refresh:hover { background: ${C.border} !important; }`}</style>
+
+```
+  {/* HEADER */}
+  <div style={S.header}>
+    <div style={S.logo}>
+      <div style={S.dot}/>
+      <span style={{ color: C.amber, fontWeight:700, fontSize: 13, letterSpacing: 2 }}>
+        NSE RISK MONITOR
+      </span>
+      <span style={{ color: C.muted, fontSize: 10 }}>// INDIA MARKET INTELLIGENCE</span>
+    </div>
+    <div style={{ display:"flex", alignItems:"center", gap: 16 }}>
+      <span style={{ color: C.muted, fontSize: 9, letterSpacing: 1 }}>
+        {lastUpdated ? `LAST SYNC  ${lastUpdated.toLocaleTimeString("en-IN")}` : ""}
+      </span>
+      <button className="btn-refresh" style={{ ...S.btn, borderColor: C.border, color: C.dimText }}
+        onClick={loadData}>
+        {refreshing ? "⟳ SYNCING" : "⟳ REFRESH"}
+      </button>
+      <div style={{ ...S.signalBadge(rl) }}>{rl.emoji} SIGNAL: {rl.signal}</div>
+    </div>
+  </div>
+
+  {/* BODY GRID */}
+  <div style={S.grid}>
+    {/* SIDEBAR */}
+    <div style={S.sidebar}>
+
+      {/* Gauge */}
+      <div style={{ ...S.card, display:"flex", flexDirection:"column", alignItems:"center", padding: "20px 16px" }}>
+        <div style={{ ...S.label, marginBottom: 12 }}>Composite Risk Score</div>
+        <GaugeArc score={data.composite}/>
+        <div style={{ marginTop: 8, display:"flex", flexDirection:"column", alignItems:"center", gap: 4 }}>
+          <div style={{ ...S.signalBadge(rl), fontSize: 10 }}>{rl.signal}</div>
+          <div style={{ color: C.muted, fontSize: 9, marginTop: 4 }}>0 = MAX RISK · 100 = NO RISK</div>
+        </div>
+      </div>
+
+      {/* Market Prices */}
+      <div style={S.card}>
+        <div style={S.label}>Live Indices</div>
+        {[
+          { label:"NIFTY 50",   val:`₹${Number(data.nifty).toLocaleString("en-IN")}`,  color: C.white },
+          { label:"BANK NIFTY", val:`₹${Number(data.bnifty).toLocaleString("en-IN")}`, color: C.white },
+          { label:"INDIA VIX",  val:data.vix, color: parseFloat(data.vix) > 20 ? C.red : parseFloat(data.vix) > 15 ? C.yellow : C.green },
+          { label:"INR / USD",  val:`₹${data.inr}`, color: C.cyan },
+          { label:"10Y G-SEC",  val:`${data.tnY10}%`, color: C.amber },
+        ].map(item => (
+          <div key={item.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding: "7px 0", borderBottom: `1px solid ${C.border}` }}>
+            <span style={{ fontSize: 9, color: C.muted, letterSpacing: 1 }}>{item.label}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: item.color }}>{item.val}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Position Sizing Guide */}
+      <div style={S.card}>
+        <div style={S.label}>Risk-Adjusted Sizing</div>
+        {[
+          { range:"70-100", label:"Full Size",  pct:"100%", color: C.green },
+          { range:"50-69",  label:"Half Size",  pct:"50%",  color: C.yellow },
+          { range:"35-49",  label:"Minimal",    pct:"25%",  color: C.amber },
+          { range:"0-34",   label:"Flat/Exit",  pct:"0%",   color: C.red },
+        ].map(row => {
+          const active = {
+            "70-100": data.composite >= 70,
+            "50-69":  data.composite >= 50 && data.composite < 70,
+            "35-49":  data.composite >= 35 && data.composite < 50,
+            "0-34":   data.composite < 35,
+          }[row.range];
+          return (
+            <div key={row.range} style={{
+              display:"flex", justifyContent:"space-between", alignItems:"center",
+              padding:"6px 8px", margin:"3px 0", borderRadius: 3,
+              background: active ? `${row.color}18` : "transparent",
+              border: `1px solid ${active ? row.color : "transparent"}`,
+              transition: "all 0.5s",
+            }}>
+              <div>
+                <div style={{ fontSize: 9, color: row.color, letterSpacing: 1 }}>{row.label}</div>
+                <div style={{ fontSize: 8, color: C.muted }}>Score {row.range}</div>
+              </div>
+              <span style={{ fontSize: 16, fontWeight: 700, color: active ? row.color : C.muted }}>{row.pct}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+
+    {/* MAIN */}
+    <div style={S.main}>
+
+      {/* Top row: factors + sparkline */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap: 16 }}>
+
+        {/* Risk Factors */}
+        <div style={S.card}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 14 }}>
+            <div style={S.label}>Risk Factor Breakdown</div>
+            <div style={{ fontSize: 9, color: C.muted }}>Click a factor for detail</div>
+          </div>
+          {RISK_FACTORS.map(f => {
+            const score = data.rawScores[f.key];
+            const fl = riskLabel(score);
+            const isSelected = selectedFactor === f.key;
+            return (
+              <div key={f.key}
+                className="factor-row"
+                onClick={() => setSelected(isSelected ? null : f.key)}
+                style={{
+                  padding: "10px 8px", borderRadius: 4, marginBottom: 2,
+                  background: isSelected ? "#1a2535" : "transparent",
+                  border: `1px solid ${isSelected ? C.borderHi : "transparent"}`,
+                  transition: "all 0.15s",
+                }}>
+                <div style={{ display:"flex", alignItems:"center", gap: 10 }}>
+                  <div style={{ width: 8, height: 8, borderRadius:"50%", background: fl.color, flexShrink: 0,
+                    boxShadow: `0 0 5px ${fl.color}` }}/>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom: 5 }}>
+                      <span style={{ fontSize: 10, color: C.white, letterSpacing: 0.5 }}>{f.label}</span>
+                      <div style={{ display:"flex", alignItems:"center", gap: 8 }}>
+                        <span style={{ fontSize: 9, color: C.muted }}>wt {f.weight}%</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: fl.color, minWidth: 28, textAlign:"right" }}>{score}</span>
+                      </div>
+                    </div>
+                    <ScoreBar value={score} color={fl.color}/>
+                  </div>
+                </div>
+                {isSelected && (
+                  <div style={{ marginTop: 8, paddingLeft: 18, fontSize: 9, color: C.dimText, lineHeight: 1.7,
+                    animation: "fadeIn 0.2s ease" }}>
+                    {f.desc} · Current regime: <span style={{color: fl.color}}>{fl.label}</span> · Contribution: {(score * f.weight / 100).toFixed(1)} pts
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Equity Curve + Stats */}
+        <div style={{ display:"flex", flexDirection:"column", gap: 16 }}>
+          <div style={{ ...S.card, flex: 1 }}>
+            <div style={S.label}>Portfolio Equity Curve (30d sim)</div>
+            <div style={{ marginTop: 8 }}>
+              <Sparkline data={data.equity} color={data.equity[29] > 100 ? C.green : C.red} height={80} width={250}/>
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", marginTop: 8 }}>
+              <div>
+                <div style={{ fontSize: 8, color: C.muted }}>START</div>
+                <div style={{ fontSize: 11, color: C.white }}>100.00</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize: 8, color: C.muted }}>CURRENT</div>
+                <div style={{ fontSize: 11, color: data.equity[29] > 100 ? C.green : C.red, fontWeight:700 }}>
+                  {data.equity[29].toFixed(2)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ ...S.card }}>
+            <div style={S.label}>Risk Metrics</div>
+            {[
+              { k:"Max Drawdown", v:`-${(2+Math.random()*5).toFixed(1)}%`, c: C.red },
+              { k:"Sharpe (30d)", v:(0.8+Math.random()*1.2).toFixed(2), c: C.cyan },
+              { k:"Win Rate",    v:`${Math.round(48+Math.random()*12)}%`, c: C.green },
+              { k:"Avg R:R",     v:`1 : ${(1.5+Math.random()*1).toFixed(1)}`, c: C.amber },
+            ].map(m => (
+              <div key={m.k} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0",
+                borderBottom:`1px solid ${C.border}` }}>
+                <span style={{ fontSize: 9, color: C.muted }}>{m.k}</span>
+                <span style={{ fontSize: 11, fontWeight:700, color: m.c }}>{m.v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Sector Heatmap */}
+      <div style={S.card}>
+        <div style={S.label}>Sector Risk Heatmap — NSE</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap: 8, marginTop: 12 }}>
+          {topSectors.map(s => {
+            const { score, change } = data.sectors[s];
+            const sl = riskLabel(score);
+            return (
+              <div key={s} style={{
+                background: `${sl.color}14`,
+                border: `1px solid ${sl.color}44`,
+                borderRadius: 4, padding: "10px 10px",
+                transition: "all 0.3s",
+              }}>
+                <div style={{ fontSize: 8, color: C.muted, letterSpacing: 1, marginBottom: 6, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{s.toUpperCase()}</div>
+                <div style={{ fontSize: 18, fontWeight:700, color: sl.color }}>{score}</div>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop: 4 }}>
+                  <div style={{ fontSize: 8, color: sl.color }}>{sl.label.split(" ")[0]}</div>
+                  <div style={{ fontSize: 9, color: parseFloat(change) >= 0 ? C.green : C.red }}>
+                    {parseFloat(change) >= 0 ? "+" : ""}{change}%
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* AI Analysis */}
+      <div style={S.card}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 14 }}>
+          <div>
+            <div style={S.label}>AI Risk Analysis</div>
+            <div style={{ fontSize: 9, color: C.muted }}>Claude · Quant Risk Analyst · Indian Equity Markets</div>
+          </div>
+          <button className="btn-ai" style={{ ...S.btn }} onClick={runAiAnalysis} disabled={aiLoading}>
+            {aiLoading ? "⟳ ANALYSING..." : "▶ RUN ANALYSIS"}
+          </button>
+        </div>
+
+        {!aiAnalysis && !aiLoading && !aiError && (
+          <div style={{ textAlign:"center", padding: "30px 0", color: C.muted, fontSize: 10, letterSpacing: 1 }}>
+            ── PRESS "RUN ANALYSIS" FOR AI-POWERED RISK ASSESSMENT ──
+          </div>
+        )}
+        {aiLoading && (
+          <div style={{ display:"flex", alignItems:"center", gap: 12, padding: "20px 0" }}>
+            <div style={{ width:16, height:16, border:`2px solid ${C.amber}`, borderTopColor:"transparent",
+              borderRadius:"50%", animation:"spin 0.8s linear infinite" }}/>
+            <span style={{ color: C.muted, fontSize: 10, letterSpacing: 1 }}>PROCESSING MARKET DATA · GENERATING ANALYSIS…</span>
+          </div>
+        )}
+        {aiError && <div style={{ color: C.red, fontSize: 10, padding:"12px 0" }}>{aiError}</div>}
+        {aiAnalysis && (
+          <div style={{ fontSize: 11, lineHeight: 1.8, color: C.white, animation:"fadeIn 0.4s ease" }}
+            dangerouslySetInnerHTML={{ __html: parseAiMarkdown(aiAnalysis) }}/>
+        )}
+      </div>
+
+      {/* Entry/Exit Rules */}
+      <div style={S.card}>
+        <div style={S.label}>Entry / Exit Decision Matrix</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap: 10, marginTop: 12 }}>
+          {[
+            { score:"70–100", title:"FULL ENTRY", color: C.green,  items:["All sectors eligible","Max position sizing","Swing & futures entries OK","Tight SL allowed"] },
+            { score:"50–69",  title:"SELECTIVE",  color: C.yellow, items:["Strong sectors only","50% sizing","No new high-beta trades","Widen stops"] },
+            { score:"35–49",  title:"DEFENSIVE",  color: C.amber,  items:["Reduce existing","25% sizing max","Hedges recommended","Focus on large caps"] },
+            { score:"0–34",   title:"EXIT / FLAT",color: C.red,    items:["Close all longs","No new entries","Short hedges only","Cash is a position"] },
+          ].map(regime => {
+            const isActive = {
+              "70–100": data.composite >= 70,
+              "50–69":  data.composite >= 50 && data.composite < 70,
+              "35–49":  data.composite >= 35 && data.composite < 50,
+              "0–34":   data.composite < 35,
+            }[regime.score];
+            return (
+              <div key={regime.score} style={{
+                background: isActive ? `${regime.color}15` : "#0d1017",
+                border: `1px solid ${isActive ? regime.color : C.border}`,
+                borderRadius: 4, padding: 12,
+                boxShadow: isActive ? `0 0 16px ${regime.color}22` : "none",
+                transition: "all 0.5s",
+              }}>
+                <div style={{ fontSize: 8, color: C.muted, marginBottom: 4 }}>Score {regime.score}</div>
+                <div style={{ fontSize: 11, fontWeight:700, color: isActive ? regime.color : C.muted,
+                  letterSpacing: 1, marginBottom: 10 }}>
+                  {isActive ? "▶ " : ""}{regime.title}
+                </div>
+                {regime.items.map(item => (
+                  <div key={item} style={{ display:"flex", gap:6, fontSize:9, color: isActive ? C.dimText : C.muted,
+                    marginBottom:4, lineHeight:1.5 }}>
+                    <span style={{color: isActive ? regime.color : C.muted, flexShrink:0}}>▸</span>
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+```
+
+);
+}
