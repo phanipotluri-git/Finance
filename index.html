@@ -242,13 +242,20 @@
     </div>
 
     <div style="margin-bottom:14px">
-      <div class="lbl">Anthropic API Key (optional)</div>
-      <div style="font-size:8px;color:var(--muted);margin-bottom:2px">Enables real AI analysis. Stored on your device only — never transmitted.</div>
-      <input class="inp" type="password" id="key-inp" placeholder="sk-ant-api03-..."/>
+      <div class="lbl">AI Provider</div>
+      <div style="display:flex;gap:7px;margin-bottom:10px">
+        <button class="btn btn-a" id="prov-gemini"    onclick="setProvider('gemini')">GEMINI (FREE)</button>
+        <button class="btn"       id="prov-anthropic" onclick="setProvider('anthropic')">CLAUDE (PAID)</button>
+      </div>
+      <div id="key-hint" style="font-size:8px;color:var(--muted);margin-bottom:6px">
+        Free: aistudio.google.com &rarr; Get API Key &rarr; paste below
+      </div>
+      <input class="inp" type="password" id="key-inp" placeholder="AIza... (Gemini key)"/>
       <div style="display:flex;gap:8px;margin-top:8px">
         <button class="btn btn-a" onclick="saveKey()">SAVE</button>
         <button class="btn" onclick="clearKey()">CLEAR</button>
       </div>
+      <div id="key-status" style="font-size:8px;color:var(--green);margin-top:5px"></div>
     </div>
 
     <hr class="div">
@@ -678,46 +685,95 @@ function renderAll() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// AI ANALYSIS (optional — requires Anthropic API key in settings)
+// AI ANALYSIS — Google Gemini (free) or Anthropic Claude (paid)
 // ══════════════════════════════════════════════════════════════════════════════
 async function runAi() {
-  const key = localStorage.getItem("risk_api_key");
+  const key      = localStorage.getItem("risk_api_key");
+  const provider = localStorage.getItem("risk_ai_provider") || "gemini";
   if (!key) { openModal(); return; }
+
   const btn = q("ai-btn");
-  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Thinking…`;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span> Thinking…`;
+
   const score = S.composite ?? 50;
   const f = S.factors;
-  const L = S.live||{};
-  const prompt = `You are a senior quant risk analyst for NSE/BSE Indian markets.
+  const L = S.live || {};
 
-COMPOSITE RISK SCORE: ${score}/100  SIGNAL: ${ri(score).sig}
-${FACTOR_META.map(fm=>`${fm.label}: ${f[fm.key]??50}/100 (${fm.src})`).join(" | ")}
-Nifty: ₹${L.nifty??("+N/A")} | VIX: ${L.vix??"N/A"} | INR: ${L.inr??"N/A"}
+  // Build sector summary for richer context
+  const secLines = S.slowSectors
+    ? Object.entries(S.slowSectors).map(([k,v]) => k + ":" + v.score + "(RSI " + v.rsi + ")").join(" | ")
+    : "pending";
 
-Respond in exactly 3 labelled sections:
-1. **Market Assessment** (2–3 sentences, data-driven, no fluff)
-2. **Investment Action** (2–3 sentences, what to do TODAY)
-3. **Key Risks** (3–4 bullet points with specific triggers)`;
+  const prompt =
+    "You are a senior quant risk analyst for NSE/BSE Indian equity markets.\n\n" +
+    "COMPOSITE RISK SCORE: " + score + "/100  SIGNAL: " + ri(score).sig + "\n" +
+    FACTOR_META.map(fm => fm.label + ": " + (f[fm.key]??50) + "/100").join(" | ") + "\n" +
+    "Nifty: " + (L.nifty ? "Rs" + (+L.nifty).toFixed(0) : "N/A") +
+    " | VIX: " + (L.vix ? (+L.vix).toFixed(2) : "N/A") +
+    " | INR/USD: " + (L.inr ? (+L.inr).toFixed(2) : "N/A") + "\n" +
+    "Sectors: " + secLines + "\n\n" +
+    "Respond in exactly 3 labelled sections:\n" +
+    "1. **Market Assessment** (2-3 sentences, data-driven, specific numbers)\n" +
+    "2. **Investment Action** (2-3 sentences, what to do TODAY for NSE trader)\n" +
+    "3. **Key Risks** (3-4 bullet points with specific triggers to watch)";
+
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:550,messages:[{role:"user",content:prompt}]}),
-    });
-    const data = await res.json();
-    const text = data.content?.find(b=>b.type==="text")?.text || "";
+    let text = "";
+
+    if (provider === "gemini") {
+      // ── Google Gemini (free tier) ──────────────────────────────────────────
+      const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + key;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 600, temperature: 0.4 },
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      q("ai-src").textContent = "Gemini 2.0 Flash · " + new Date().toLocaleTimeString("en-IN");
+
+    } else {
+      // ── Anthropic Claude (paid fallback) ───────────────────────────────────
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 600,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      text = data.content?.find(b => b.type === "text")?.text || "";
+      q("ai-src").textContent = "Claude AI · " + new Date().toLocaleTimeString("en-IN");
+    }
+
+    // Render markdown → styled HTML
     const html = text
-      .replace(/\*\*(.+?)\*\*/g,`<strong>$1</strong>`)
-      .replace(/^#{1,3}\s(.+)$/gm,`<div class="sh">$1</div>`)
-      .replace(/^\d+\.\s\*\*(.+?)\*\*(.*)$/gm,`<div class="sh">$1</div><div style="margin-bottom:6px">$2</div>`)
-      .replace(/^[-•]\s(.+)$/gm,`<div class="bul"><span style="color:var(--amber);flex-shrink:0">▸</span><span style="font-size:10px">$1</span></div>`)
-      .replace(/\n\n/g,'<div style="margin:5px 0"></div>');
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/^#{1,3}\s(.+)$/gm, '<div class="sh">$1</div>')
+      .replace(/^\d+\.\s\*\*(.+?)\*\*(.*)$/gm, '<div class="sh">$1</div><div style="margin-bottom:6px">$2</div>')
+      .replace(/^[-•*]\s(.+)$/gm, '<div class="bul"><span style="color:var(--amber);flex-shrink:0">▸</span><span style="font-size:10px">$1</span></div>')
+      .replace(/\n\n/g, '<div style="margin:5px 0"></div>');
     q("narr").innerHTML = html;
-    q("ai-src").textContent = `Claude AI · ${new Date().toLocaleTimeString("en-IN")}`;
+
   } catch(e) {
-    q("narr").innerHTML = `<div style="color:var(--red);font-size:10px">AI call failed: ${e.message}</div>`;
+    q("narr").innerHTML = '<div style="color:var(--red);font-size:10px">AI call failed: ' + e.message + '<br><br>Check your API key in ⚙ Settings.</div>';
   }
-  btn.disabled = false; btn.textContent = "▶ AI ANALYSIS";
+
+  btn.disabled = false;
+  btn.textContent = "▶ AI ANALYSIS";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -725,15 +781,39 @@ Respond in exactly 3 labelled sections:
 // ══════════════════════════════════════════════════════════════════════════════
 function openModal() {
   const k = localStorage.getItem("risk_api_key");
-  q("key-inp").value = k ? "sk-ant-..." : "";
+  const p = localStorage.getItem("risk_ai_provider") || "gemini";
+  q("key-inp").value = k ? "••••••••" : "";
   q("modal").classList.add("on");
+  setProvider(p, false); // refresh button highlight without saving
 }
 function closeModal() { q("modal").classList.remove("on"); }
+
+function setProvider(p, save=true) {
+  if (save) localStorage.setItem("risk_ai_provider", p);
+  const isGemini = p === "gemini";
+  q("prov-gemini").className    = "btn" + (isGemini ? " btn-a" : "");
+  q("prov-anthropic").className = "btn" + (!isGemini ? " btn-a" : "");
+  q("key-hint").innerHTML = isGemini
+    ? "Free: aistudio.google.com &rarr; Get API Key &rarr; paste below"
+    : "Paid: console.anthropic.com &rarr; API Keys &rarr; paste below";
+  q("key-inp").placeholder = isGemini ? "AIza... (Gemini key)" : "sk-ant-api03-... (Anthropic key)";
+}
+
 function saveKey() {
   const v = q("key-inp").value.trim();
-  if (v && v!=="sk-ant-...") { localStorage.setItem("risk_api_key",v); closeModal(); q("ai-src").textContent="Claude AI · Key configured"; }
+  if (v && v !== "••••••••") {
+    localStorage.setItem("risk_api_key", v);
+    const p = localStorage.getItem("risk_ai_provider") || "gemini";
+    q("key-status").textContent = (p === "gemini" ? "Gemini" : "Claude") + " key saved.";
+    q("ai-src").textContent = (p === "gemini" ? "Gemini 2.0 Flash" : "Claude AI") + " · Key configured";
+    setTimeout(() => closeModal(), 900);
+  }
 }
-function clearKey() { localStorage.removeItem("risk_api_key"); q("key-inp").value=""; }
+function clearKey() {
+  localStorage.removeItem("risk_api_key");
+  q("key-inp").value = "";
+  q("key-status").textContent = "Key cleared.";
+}
 
 function setRI(ms) {
   S.timerInterval=ms; if (S.timer) clearInterval(S.timer);
