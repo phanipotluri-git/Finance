@@ -1,0 +1,38 @@
+name: Update Risk Data
+
+on:
+  schedule:
+    - cron: "0 1 * * 1-5"
+    - cron: "30 7 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  fetch-and-commit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install yfinance pandas numpy
+
+      - name: Run risk data script
+        run: python scripts/fetch_risk_data.py
+
+      - name: Commit updated risk_factors.json
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name  "github-actions[bot]"
+          git add data/risk_factors.json
+          git diff --staged --quiet && echo "No changes – skipping commit" && exit 0
+          git commit -m "chore: risk data $(date -u '+%Y-%m-%d %H:%M') UTC"
+          git push
