@@ -243,9 +243,10 @@
 
     <div style="margin-bottom:14px">
       <div class="lbl">AI Provider</div>
-      <div style="display:flex;gap:7px;margin-bottom:10px">
-        <button class="btn btn-a" id="prov-gemini"    onclick="setProvider('gemini')">GEMINI (FREE)</button>
-        <button class="btn"       id="prov-anthropic" onclick="setProvider('anthropic')">CLAUDE (PAID)</button>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn btn-a" id="prov-gemini"    onclick="setProvider('gemini')">GEMINI</button>
+        <button class="btn"       id="prov-groq"      onclick="setProvider('groq')">GROQ (FREE)</button>
+        <button class="btn"       id="prov-anthropic" onclick="setProvider('anthropic')">CLAUDE</button>
       </div>
       <div id="key-hint" style="font-size:8px;color:var(--muted);margin-bottom:6px">
         Free: aistudio.google.com &rarr; Get API Key &rarr; paste below
@@ -737,6 +738,23 @@ async function runAi() {
       text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
       q("ai-src").textContent = "Gemini 2.0 Flash · " + new Date().toLocaleTimeString("en-IN");
 
+    } else if (provider === "groq") {
+      // ── Groq (free — Llama 3) ─────────────────────────────────────────────
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+        body: JSON.stringify({
+          model: "llama-3.1-8b-instant",
+          max_tokens: 600,
+          temperature: 0.4,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      text = data.choices?.[0]?.message?.content || "";
+      q("ai-src").textContent = "Groq · Llama 3.1 · " + new Date().toLocaleTimeString("en-IN");
+
     } else {
       // ── Anthropic Claude (paid fallback) ───────────────────────────────────
       const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -790,13 +808,20 @@ function closeModal() { q("modal").classList.remove("on"); }
 
 function setProvider(p, save=true) {
   if (save) localStorage.setItem("risk_ai_provider", p);
-  const isGemini = p === "gemini";
-  q("prov-gemini").className    = "btn" + (isGemini ? " btn-a" : "");
-  q("prov-anthropic").className = "btn" + (!isGemini ? " btn-a" : "");
-  q("key-hint").innerHTML = isGemini
-    ? "Free: aistudio.google.com &rarr; Get API Key &rarr; paste below"
-    : "Paid: console.anthropic.com &rarr; API Keys &rarr; paste below";
-  q("key-inp").placeholder = isGemini ? "AIza... (Gemini key)" : "sk-ant-api03-... (Anthropic key)";
+  ["prov-gemini","prov-groq","prov-anthropic"].forEach(id => q(id).className = "btn");
+  q("prov-" + p).className = "btn btn-a";
+  const hints = {
+    gemini:    "Free: aistudio.google.com &rarr; Get API Key &rarr; Create API key in new project",
+    groq:      "Free: console.groq.com &rarr; Sign up &rarr; API Keys &rarr; Create (gsk_...)",
+    anthropic: "Paid: console.anthropic.com &rarr; API Keys &rarr; Create key (sk-ant-...)",
+  };
+  const placeholders = {
+    gemini:    "AIza... (Gemini key)",
+    groq:      "gsk_... (Groq key)",
+    anthropic: "sk-ant-api03-... (Anthropic key)",
+  };
+  q("key-hint").innerHTML = hints[p] || hints.gemini;
+  q("key-inp").placeholder = placeholders[p] || placeholders.gemini;
 }
 
 function saveKey() {
@@ -804,8 +829,9 @@ function saveKey() {
   if (v && v !== "••••••••") {
     localStorage.setItem("risk_api_key", v);
     const p = localStorage.getItem("risk_ai_provider") || "gemini";
-    q("key-status").textContent = (p === "gemini" ? "Gemini" : "Claude") + " key saved.";
-    q("ai-src").textContent = (p === "gemini" ? "Gemini 2.0 Flash" : "Claude AI") + " · Key configured";
+    const labels = { gemini: "Gemini", groq: "Groq", anthropic: "Claude" };
+    q("key-status").textContent = (labels[p] || "AI") + " key saved.";
+    q("ai-src").textContent = (labels[p] || "AI") + " · Key configured";
     setTimeout(() => closeModal(), 900);
   }
 }
