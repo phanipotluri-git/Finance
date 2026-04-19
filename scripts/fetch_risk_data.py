@@ -321,8 +321,8 @@ def main():
     print(f"  Breadth score : {breadth['score']}")
     print(f"  FII proxy     : {fii['score']}")
     print(f"  Macro         : {macro['score']}")
-        sector_summary = ', '.join(f'{k}={v["score"]}' for k, v in sectors.items())
-    print(f"  Sectors       : {sector_summary}")
+    sector_summary = ", ".join(str(k) + "=" + str(v["score"]) for k, v in sectors.items())
+    print("  Sectors       : " + sector_summary)
 
 
 
