@@ -63,12 +63,27 @@ def ema(series: pd.Series, n: int) -> float:
 
 
 def rsi_val(series: pd.Series, n: int = 14) -> float:
+    """Wilder's smoothed RSI — matches Kite/TradingView exactly."""
     delta = series.diff().dropna()
-    gain  = delta.clip(lower=0).tail(n).mean()
-    loss  = (-delta.clip(upper=0)).tail(n).mean()
-    if loss == 0:
+    if len(delta) < n + 1:
+        return 50.0
+
+    gains  = delta.clip(lower=0)
+    losses = (-delta.clip(upper=0))
+
+    # First average: simple mean of first n periods
+    avg_gain = gains.iloc[:n].mean()
+    avg_loss = losses.iloc[:n].mean()
+
+    # Wilder's smoothing for remaining periods
+    for i in range(n, len(gains)):
+        avg_gain = (avg_gain * (n - 1) + gains.iloc[i]) / n
+        avg_loss = (avg_loss * (n - 1) + losses.iloc[i]) / n
+
+    if avg_loss == 0:
         return 100.0
-    return float(100 - 100 / (1 + gain / loss))
+    rs = avg_gain / avg_loss
+    return float(100 - 100 / (1 + rs))
 
 
 def pct_chg(series: pd.Series, n: int) -> float:
