@@ -427,22 +427,22 @@ function composite(factors) {
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchLive() {
   try {
-    // Use 2m interval for intraday live prices; 1d/6mo for history (trend/momentum)
-    const [nLive, nHist, bD, vD, iD] = await Promise.all([
-      yfetch("^NSEI",    "2m", "1d"),   // live Nifty price (2-min bars)
-      yfetch("^NSEI",    "1d", "6mo"),  // Nifty history for EMA/RSI
-      yfetch("^NSEBANK", "2m", "1d"),   // live Bank Nifty
-      yfetch("^INDIAVIX","1d", "1mo"),  // VIX (daily is fine)
-      yfetch("USDINR=X", "2m", "1d"),   // live INR
+    // Note: ^NSEI, ^NSEBANK, ^INDIAVIX do NOT support 2m interval on Yahoo Finance.
+    // Use 1d interval — regularMarketPrice in meta IS the live price (~15s delay).
+    // USDINR=X supports 2m so we use it for fresher INR data.
+    const [nD, bD, vD, iD] = await Promise.all([
+      yfetch("^NSEI",    "1d", "6mo"),  // Nifty: history + live meta price
+      yfetch("^NSEBANK", "1d", "5d"),   // Bank Nifty: live meta price
+      yfetch("^INDIAVIX","1d", "1mo"),  // VIX: live meta price
+      yfetch("USDINR=X", "2m", "1d"),   // INR: 2m works for FX pairs
     ]);
 
-    // Live price: prefer 2m bar's last close; fallback to meta price
-    const liveNifty  = nLive.price  ?? nLive.closes.at(-1);
-    const liveBNifty = bD.price     ?? bD.closes.at(-1);
-    const liveVix    = vD.price     ?? vD.closes.at(-1);
-    const liveInr    = iD.price     ?? iD.closes.at(-1);
+    const liveNifty  = nD.price ?? nD.closes.at(-1);
+    const liveBNifty = bD.price ?? bD.closes.at(-1);
+    const liveVix    = vD.price ?? vD.closes.at(-1);
+    const liveInr    = iD.price ?? iD.closes.at(-1);
 
-    const nc = nHist.closes.filter(Boolean);
+    const nc = nD.closes.filter(Boolean);
 
     S.live = {
       nifty:    liveNifty,
@@ -465,6 +465,7 @@ async function fetchLive() {
     return false;
   }
 }
+
 
 async function fetchSlow() {
   try {
