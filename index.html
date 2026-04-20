@@ -425,46 +425,52 @@ function composite(factors) {
 // ══════════════════════════════════════════════════════════════════════════════
 // DATA FETCHING
 // ══════════════════════════════════════════════════════════════════════════════
+async function fetchLivePrices() {
+  const results = await Promise.allSettled([
+    yfetch("^NSEI",    "1d", "5d"),
+    yfetch("^NSEBANK", "1d", "5d"),
+    yfetch("^INDIAVIX","1d", "5d"),
+    yfetch("USDINR=X", "1d", "5d"),
+  ]);
+  const get = (r) => r.status === "fulfilled" ? (r.value.price ?? r.value.closes.at(-1)) : null;
+  const nifty = get(results[0]), bnifty = get(results[1]);
+  const vix   = get(results[2]), inr    = get(results[3]);
+  if (!S.live) S.live = { nifty:null, bnifty:null, vix:null, inr:null, niftyHist:[] };
+  if (nifty  != null) S.live.nifty  = nifty;
+  if (bnifty != null) S.live.bnifty = bnifty;
+  if (vix    != null) { S.live.vix = vix; S.factors.vix = vixScore(vix); }
+  if (inr    != null) S.live.inr   = inr;
+  return [nifty, bnifty, vix, inr].filter(Boolean).length;
+}
+
+async function fetchHistory() {
+  try {
+    const d = await yfetch("^NSEI", "1d", "6mo");
+    const nc = d.closes.filter(Boolean);
+    if (nc.length > 20) {
+      if (!S.live) S.live = { nifty:null, bnifty:null, vix:null, inr:null, niftyHist:[] };
+      S.live.niftyHist = nc;
+      S.factors.trend    = trendScore(nc);
+      S.factors.momentum = momentumScore(nc);
+    }
+    return true;
+  } catch(e) { console.warn("History fetch failed:", e.message); return false; }
+}
+
 async function fetchLive() {
   try {
-    // Note: ^NSEI, ^NSEBANK, ^INDIAVIX do NOT support 2m interval on Yahoo Finance.
-    // Use 1d interval — regularMarketPrice in meta IS the live price (~15s delay).
-    // USDINR=X supports 2m so we use it for fresher INR data.
-    const [nD, bD, vD, iD] = await Promise.all([
-      yfetch("^NSEI",    "1d", "6mo"),  // Nifty: history + live meta price
-      yfetch("^NSEBANK", "1d", "5d"),   // Bank Nifty: live meta price
-      yfetch("^INDIAVIX","1d", "1mo"),  // VIX: live meta price
-      yfetch("USDINR=X", "2m", "1d"),   // INR: 2m works for FX pairs
-    ]);
-
-    const liveNifty  = nD.price ?? nD.closes.at(-1);
-    const liveBNifty = bD.price ?? bD.closes.at(-1);
-    const liveVix    = vD.price ?? vD.closes.at(-1);
-    const liveInr    = iD.price ?? iD.closes.at(-1);
-
-    const nc = nD.closes.filter(Boolean);
-
-    S.live = {
-      nifty:    liveNifty,
-      bnifty:   liveBNifty,
-      vix:      liveVix,
-      inr:      liveInr,
-      niftyHist: nc,
-    };
+    const ok = await fetchLivePrices();
     S.lastLive = new Date();
-    S.factors.vix      = vixScore(liveVix);
-    S.factors.trend    = trendScore(nc);
-    S.factors.momentum = momentumScore(nc);
-    q("st-live").textContent = "✓ " + S.lastLive.toLocaleTimeString("en-IN");
-    q("st-live").style.color = "#00d084";
-    return true;
+    q("st-live").textContent = (ok === 4 ? "✓ " : "⚠ " + ok + "/4 · ") + S.lastLive.toLocaleTimeString("en-IN");
+    q("st-live").style.color = ok >= 2 ? "#00d084" : "#ffd32a";
+    return ok > 0;
   } catch(e) {
-    console.error("Live fetch:", e);
     q("st-live").textContent = "⚠ Proxy failed — retrying";
     q("st-live").style.color = "#ff4757";
     return false;
   }
 }
+
 
 
 async function fetchSlow() {
