@@ -426,21 +426,58 @@ function composite(factors) {
 // DATA FETCHING
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchLivePrices() {
-  const results = await Promise.allSettled([
-    yfetch("^NSEI",    "1d", "5d"),
-    yfetch("^NSEBANK", "1d", "5d"),
-    yfetch("^INDIAVIX","1d", "5d"),
-    yfetch("USDINR=X", "1d", "5d"),
-  ]);
-  const get = (r) => r.status === "fulfilled" ? (r.value.price ?? r.value.closes.at(-1)) : null;
-  const nifty = get(results[0]), bnifty = get(results[1]);
-  const vix   = get(results[2]), inr    = get(results[3]);
+  const QUOTE_SYMS = "^NSEI,^NSEBANK,^INDIAVIX,USDINR=X";
+
+async function fetchLivePrices() {
+  const ts  = Math.floor(Date.now() / 60000);
+  const url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols="
+            + encodeURIComponent(QUOTE_SYMS) + "&_t=" + ts;
+
+  let data = null;
+  for (let i = 0; i < PROXIES.length; i++) {
+    try {
+      const r = await fetch(PROXIES[i](url), { signal: AbortSignal.timeout(10000) });
+      if (!r.ok) continue;
+      data = await r.json();
+      if (data?.quoteResponse?.result?.length) break;
+      data = null;
+    } catch { }
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  if (!data?.quoteResponse?.result) {
+    const url2 = url.replace("query1.", "query2.");
+    for (let i = 0; i < PROXIES.length; i++) {
+      try {
+        const r = await fetch(PROXIES[i](url2), { signal: AbortSignal.timeout(10000) });
+        if (!r.ok) continue;
+        data = await r.json();
+        if (data?.quoteResponse?.result?.length) break;
+        data = null;
+      } catch { }
+    }
+  }
+
+  if (!data?.quoteResponse?.result) throw new Error("All proxies failed");
+
+  const bySymbol = {};
+  for (const q of data.quoteResponse.result) {
+    bySymbol[q.symbol] = q.regularMarketPrice;
+  }
+
   if (!S.live) S.live = { nifty:null, bnifty:null, vix:null, inr:null, niftyHist:[] };
+
+  const nifty  = bySymbol["^NSEI"]     ?? null;
+  const bnifty = bySymbol["^NSEBANK"]  ?? null;
+  const vix    = bySymbol["^INDIAVIX"] ?? null;
+  const inr    = bySymbol["USDINR=X"]  ?? null;
+
   if (nifty  != null) S.live.nifty  = nifty;
   if (bnifty != null) S.live.bnifty = bnifty;
   if (vix    != null) { S.live.vix = vix; S.factors.vix = vixScore(vix); }
   if (inr    != null) S.live.inr   = inr;
-  return [nifty, bnifty, vix, inr].filter(Boolean).length;
+
+  return [nifty, bnifty, vix, inr].filter(x => x != null).length;
 }
 
 async function fetchHistory() {
