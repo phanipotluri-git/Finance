@@ -433,7 +433,7 @@ async function fetchLive() {
     const [nD, bD, vD, iD] = await Promise.all([
       yfetch("^NSEI",    "1d", "6mo"),  // Nifty: history + live meta price
       yfetch("^NSEBANK", "1d", "5d"),   // Bank Nifty: live meta price
-      yfetch("^INDIAVIX","1d", "1mo"),  // VIX: live meta price
+      yfetch("^INDIAVIX","5m", "1mo"),  // VIX: live meta price
       yfetch("USDINR=X", "2m", "1d"),   // INR: 2m works for FX pairs
     ]);
 
