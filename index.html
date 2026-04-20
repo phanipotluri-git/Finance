@@ -338,21 +338,26 @@ function ri(score) {
 async function proxyFetch(url, attempt=0) {
   if (attempt >= PROXIES.length) throw new Error("all proxies failed");
   try {
-    const r = await fetch(PROXIES[attempt](url), { signal: AbortSignal.timeout(9000) });
+    const r = await fetch(PROXIES[attempt](url), { signal: AbortSignal.timeout(12000) });
     if (!r.ok) throw new Error(r.status);
     return await r.json();
   } catch {
+    await new Promise(r => setTimeout(r, 400));
     return proxyFetch(url, attempt + 1);
   }
 }
 
 async function yfetch(sym, interval="1d", range="6mo") {
-  const url = `${YF}/${encodeURIComponent(sym)}?interval=${interval}&range=${range}`;
+  // Cache-bust: append ts so proxies never serve stale data
+  const ts = Math.floor(Date.now() / 60000); // changes every minute
+  const url = `${YF}/${encodeURIComponent(sym)}?interval=${interval}&range=${range}&_t=${ts}`;
   const d = await proxyFetch(url);
   const res = d?.chart?.result?.[0];
-  if (!res) throw new Error(`No data: ${sym}`);
+  if (!res) throw new Error("No data: " + sym);
   const closes = (res.indicators?.quote?.[0]?.close || []).filter(Boolean);
-  return { closes, price: res.meta?.regularMarketPrice ?? closes.at(-1) };
+  // regularMarketPrice = live price from Yahoo meta (updates ~15s delay)
+  const price = res.meta?.regularMarketPrice ?? closes.at(-1);
+  return { closes, price };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -422,24 +427,40 @@ function composite(factors) {
 // ══════════════════════════════════════════════════════════════════════════════
 async function fetchLive() {
   try {
-    const [nD,bD,vD,iD] = await Promise.all([
-      yfetch("^NSEI",    "1d","6mo"),
-      yfetch("^NSEBANK", "1d","5d"),
-      yfetch("^INDIAVIX","1d","1mo"),
-      yfetch("USDINR=X", "1d","5d"),
+    // Use 2m interval for intraday live prices; 1d/6mo for history (trend/momentum)
+    const [nLive, nHist, bD, vD, iD] = await Promise.all([
+      yfetch("^NSEI",    "2m", "1d"),   // live Nifty price (2-min bars)
+      yfetch("^NSEI",    "1d", "6mo"),  // Nifty history for EMA/RSI
+      yfetch("^NSEBANK", "2m", "1d"),   // live Bank Nifty
+      yfetch("^INDIAVIX","1d", "1mo"),  // VIX (daily is fine)
+      yfetch("USDINR=X", "2m", "1d"),   // live INR
     ]);
-    const nc = nD.closes.filter(Boolean);
-    S.live = { nifty:nD.price, bnifty:bD.price, vix:vD.price, inr:iD.price, niftyHist:nc };
+
+    // Live price: prefer 2m bar's last close; fallback to meta price
+    const liveNifty  = nLive.price  ?? nLive.closes.at(-1);
+    const liveBNifty = bD.price     ?? bD.closes.at(-1);
+    const liveVix    = vD.price     ?? vD.closes.at(-1);
+    const liveInr    = iD.price     ?? iD.closes.at(-1);
+
+    const nc = nHist.closes.filter(Boolean);
+
+    S.live = {
+      nifty:    liveNifty,
+      bnifty:   liveBNifty,
+      vix:      liveVix,
+      inr:      liveInr,
+      niftyHist: nc,
+    };
     S.lastLive = new Date();
-    S.factors.vix      = vixScore(vD.price);
+    S.factors.vix      = vixScore(liveVix);
     S.factors.trend    = trendScore(nc);
     S.factors.momentum = momentumScore(nc);
-    q("st-live").textContent = "✓ Live";
+    q("st-live").textContent = "✓ " + S.lastLive.toLocaleTimeString("en-IN");
     q("st-live").style.color = "#00d084";
     return true;
   } catch(e) {
     console.error("Live fetch:", e);
-    q("st-live").textContent = "⚠ Retry";
+    q("st-live").textContent = "⚠ Proxy failed — retrying";
     q("st-live").style.color = "#ff4757";
     return false;
   }
