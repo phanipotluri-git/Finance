@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>NSE Data Diagnostic</title>
+<style>
+  body{background:#0a0c0f;color:#e8edf2;font-family:monospace;padding:14px;font-size:12px}
+  h2{color:#f5a623;margin-bottom:12px}
+  .row{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #1e2530;flex-wrap:wrap}
+  .tag{font-size:10px;padding:2px 7px;border-radius:3px;font-weight:700;flex-shrink:0;margin-top:2px}
+  .ok{background:#00d08430;color:#00d084;border:1px solid #00d084}
+  .fail{background:#ff475730;color:#ff4757;border:1px solid #ff4757}
+  .wait{background:#f5a62320;color:#f5a623;border:1px solid #f5a623}
+  .val{color:#00bcd4;font-weight:700}
+  .err{color:#ff4757;font-size:10px;word-break:break-all}
+  .desc{color:#5a6a7a;font-size:10px}
+  button{background:#f5a623;color:#000;border:none;padding:10px 20px;font-family:monospace;font-weight:700;border-radius:4px;font-size:13px;cursor:pointer;margin-bottom:16px}
+  #log{margin-top:12px;padding:10px;background:#0f1318;border:1px solid #1e2530;border-radius:4px;font-size:10px;color:#5a6a7a;max-height:200px;overflow-y:auto}
+</style>
+</head>
+<body>
+<h2>NSE Data Diagnostic</h2>
+<button onclick="runAll()">▶ RUN ALL TESTS</button>
+<div id="results"></div>
+<div id="log"></div>
+
+<script>
+const PROXIES = [
+  { name:"corsproxy.io",  fn: u => "https://corsproxy.io/?" + encodeURIComponent(u) },
+  { name:"allorigins",    fn: u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u) },
+  { name:"codetabs",      fn: u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u) },
+  { name:"thingproxy",    fn: u => "https://thingproxy.freeboard.io/fetch/" + u },
+  { name:"cors.sh",       fn: u => "https://proxy.cors.sh/" + u },
+];
+
+const TESTS = [
+  // v7 quote API — symbols NOT encoded (raw ^)
+  { label:"v7 quote (raw ^)",    url:"https://query1.finance.yahoo.com/v7/finance/quote?symbols=^NSEI,^NSEBANK,^INDIAVIX,USDINR=X", parse: parseQuote },
+  // v7 quote API — query2 domain
+  { label:"v7 quote query2",     url:"https://query2.finance.yahoo.com/v7/finance/quote?symbols=^NSEI,^NSEBANK,^INDIAVIX,USDINR=X", parse: parseQuote },
+  // v8 chart — Nifty 5d (small)
+  { label:"v8 chart ^NSEI 5d",   url:"https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?interval=1d&range=5d", parse: parseChart },
+  // v8 chart — USDINR (known working)
+  { label:"v8 chart USDINR=X",   url:"https://query1.finance.yahoo.com/v8/finance/chart/USDINR%3DX?interval=1d&range=5d", parse: parseChart },
+  // v8 chart — Bank Nifty
+  { label:"v8 chart ^NSEBANK",   url:"https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEBANK?interval=1d&range=5d", parse: parseChart },
+  // v8 chart — VIX
+  { label:"v8 chart ^INDIAVIX",  url:"https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX?interval=1d&range=5d", parse: parseChart },
+];
+
+function parseQuote(data) {
+  const res = data?.quoteResponse?.result;
+  if (!res?.length) return null;
+  return res.map(q => q.symbol + "=" + q.regularMarketPrice).join(" | ");
+}
+
+function parseChart(data) {
+  const r = data?.chart?.result?.[0];
+  if (!r) return null;
+  return r.meta?.symbol + " price=" + r.meta?.regularMarketPrice;
+}
+
+function log(msg) {
+  const el = document.getElementById("log");
+  el.textContent += msg + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+
+async function testOne(test, proxy) {
+  const url = proxy.fn(test.url);
+  const start = Date.now();
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return { ok: false, err: "HTTP " + r.status, ms: Date.now()-start };
+    const data = await r.json();
+    const val = test.parse(data);
+    if (!val) return { ok: false, err: "Bad response shape", ms: Date.now()-start };
+    return { ok: true, val, ms: Date.now()-start };
+  } catch(e) {
+    return { ok: false, err: e.message, ms: Date.now()-start };
+  }
+}
+
+async function runAll() {
+  document.getElementById("results").innerHTML = "";
+  document.getElementById("log").textContent = "";
+  log("Starting tests...\n");
+
+  for (const test of TESTS) {
+    const header = document.createElement("div");
+    header.style.cssText = "margin-top:12px;color:#f5a623;font-size:11px;letter-spacing:1px;padding:4px 0";
+    header.textContent = "── " + test.label;
+    document.getElementById("results").appendChild(header);
+
+    for (const proxy of PROXIES) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = '<span class="tag wait">TESTING</span><span class="desc">' + proxy.name + '</span>';
+      document.getElementById("results").appendChild(row);
+
+      const result = await testOne(test, proxy);
+      log(test.label + " | " + proxy.name + " | " + (result.ok ? "OK " + result.val : "FAIL " + result.err) + " (" + result.ms + "ms)");
+
+      if (result.ok) {
+        row.innerHTML = '<span class="tag ok">✓ ' + result.ms + 'ms</span>'
+          + '<span class="desc">' + proxy.name + '</span>'
+          + '<span class="val">' + result.val + '</span>';
+      } else {
+        row.innerHTML = '<span class="tag fail">✗</span>'
+          + '<span class="desc">' + proxy.name + '</span>'
+          + '<span class="err">' + result.err + '</span>';
+      }
+
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+  log("\nDone. Share a screenshot of results above.");
+}
+</script>
+
+</body>
+</html>
