@@ -4,7 +4,7 @@
 //   risk_factors.json → Stale-while-revalidate (show last known, fetch fresh in bg)
 //   Yahoo Finance / CORS proxies → Network-only (never cache live prices)
 
-const CACHE = "nse-risk-v4";
+const CACHE = "nse-risk-v5";
 const SHELL  = ["./", "./index.html", "./manifest.json"];
 
 self.addEventListener("install", e => {
