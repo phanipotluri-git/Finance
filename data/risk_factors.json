@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-04-21T10:04:41Z",
-  "next_update": "2026-04-21T16:04:41Z",
+  "generated_at": "2026-04-21T11:42:27Z",
+  "next_update": "2026-04-21T17:42:27Z",
   "factors": {
     "breadth": {
       "score": 80,
@@ -13,7 +13,7 @@
     "fii_proxy": {
       "score": 71,
       "raw": {
-        "inr_20d_chg_pct": 0.27,
+        "inr_20d_chg_pct": 0.28,
         "midcap_vs_largecap_20d_chg": 4.27,
         "inr_component": 49,
         "risk_on_component": 93
@@ -22,7 +22,7 @@
     "macro": {
       "score": 26,
       "raw": {
-        "inr_vs_1y_range_pct": 86.5,
+        "inr_vs_1y_range_pct": 86.6,
         "vix_20d_avg": 22.34,
         "inr_component": 13,
         "vix_component": 35
@@ -157,6 +157,6 @@
     "nifty_ema200": 24877.89,
     "nifty_bars": 248,
     "vix_20d_avg": 22.34,
-    "inr_current": 93.5
+    "inr_current": 93.505
   }
 }
