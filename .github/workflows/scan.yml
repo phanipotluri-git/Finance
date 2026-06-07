@@ -1,0 +1,30 @@
+name: ST Weekly Screener
+
+on:
+  schedule:
+    - cron: '0 5 * * 6'    # Saturday 10:30 AM IST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install yfinance pandas numpy
+      - name: Run ST scanner
+        run: python scripts/scan.py
+      - name: Commit results
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name  "github-actions[bot]"
+          git add data/screener_results.json
+          git diff --staged --quiet && echo "No changes" && exit 0
+          git commit -m "scan: $(date -u +'%d %b %Y %H:%M') UTC"
+          git push
