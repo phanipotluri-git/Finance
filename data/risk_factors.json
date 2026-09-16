@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-16T09:25:28Z",
-  "next_update": "2026-09-16T15:25:28Z",
+  "generated_at": "2026-09-16T12:41:56Z",
+  "next_update": "2026-09-16T18:41:56Z",
   "factors": {
     "breadth": {
       "score": 9,
@@ -13,8 +13,8 @@
     "fii_proxy": {
       "score": 44,
       "raw": {
-        "inr_20d_chg_pct": 0.16,
-        "midcap_vs_largecap_20d_chg": -1.22,
+        "inr_20d_chg_pct": 0.13,
+        "midcap_vs_largecap_20d_chg": -1.25,
         "inr_component": 49,
         "risk_on_component": 38
       }
@@ -22,7 +22,7 @@
     "macro": {
       "score": 58,
       "raw": {
-        "inr_vs_1y_range_pct": 90.1,
+        "inr_vs_1y_range_pct": 89.8,
         "vix_20d_avg": 11.47,
         "inr_component": 10,
         "vix_component": 90
@@ -32,59 +32,59 @@
   "sectors": {
     "Nifty 50": {
       "score": 0,
-      "change_1d": 0.52,
-      "change_5d": -1.67,
-      "change_20d": -3.79,
-      "rsi": 28.4,
+      "change_1d": 0.43,
+      "change_5d": -1.77,
+      "change_20d": -3.88,
+      "rsi": 27.3,
       "above_20ma": false,
       "above_50ma": false,
-      "price": 23239.5,
-      "ma20": 23874.58,
-      "ma50": 24104.0
+      "price": 23217.6,
+      "ma20": 23873.48,
+      "ma50": 24103.56
     },
     "Bank Nifty": {
       "score": 8,
       "change_1d": 0.89,
-      "change_5d": -0.86,
-      "change_20d": -1.7,
-      "rsi": 40.6,
+      "change_5d": -0.85,
+      "change_20d": -1.69,
+      "rsi": 40.7,
       "above_20ma": false,
       "above_50ma": false,
-      "price": 56288.95,
-      "ma20": 57150.41,
-      "ma50": 57375.38
+      "price": 56292.45,
+      "ma20": 57150.58,
+      "ma50": 57375.45
     },
     "IT": {
       "score": 7,
-      "change_1d": -1.75,
-      "change_5d": -2.83,
-      "change_20d": -3.89,
-      "rsi": 38.9,
+      "change_1d": -1.58,
+      "change_5d": -2.66,
+      "change_20d": -3.73,
+      "rsi": 39.2,
       "above_20ma": false,
       "above_50ma": false,
-      "price": 29038.85,
-      "ma20": 30267.65,
-      "ma50": 30106.88
+      "price": 29087.65,
+      "ma20": 30270.09,
+      "ma50": 30107.85
     },
     "Pharma": {
       "score": 8,
-      "change_1d": -0.14,
-      "change_5d": -2.71,
-      "change_20d": -0.8,
-      "rsi": 41.1,
+      "change_1d": -0.16,
+      "change_5d": -2.73,
+      "change_20d": -0.82,
+      "rsi": 41.0,
       "above_20ma": false,
       "above_50ma": false,
-      "price": 26152.2,
-      "ma20": 26601.66,
-      "ma50": 26340.16
+      "price": 26146.2,
+      "ma20": 26601.36,
+      "ma50": 26340.04
     }
   },
   "market_context": {
-    "nifty_ema20": 23768.18,
-    "nifty_ema50": 23973.45,
-    "nifty_ema200": 24364.31,
+    "nifty_ema20": 23766.09,
+    "nifty_ema50": 23972.59,
+    "nifty_ema200": 24364.09,
     "nifty_bars": 247,
     "vix_20d_avg": 11.47,
-    "inr_current": 95.97
+    "inr_current": 95.945
   }
 }
