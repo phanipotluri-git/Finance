@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-06T12:21:17Z",
-  "next_update": "2026-11-06T18:21:17Z",
+  "generated_at": "2026-11-06T15:15:28Z",
+  "next_update": "2026-11-06T21:15:28Z",
   "factors": {
     "breadth": {
       "score": 94,
@@ -24,7 +24,7 @@
       "raw": {
         "inr_vs_1y_range_pct": 64.5,
         "vix_20d_avg": 15.46,
-        "inr_component": 35,
+        "inr_component": 36,
         "vix_component": 55
       }
     }
@@ -157,6 +157,6 @@
     "nifty_ema200": 23995.57,
     "nifty_bars": 248,
     "vix_20d_avg": 15.46,
-    "inr_current": 93.9
+    "inr_current": 93.895
   }
 }
